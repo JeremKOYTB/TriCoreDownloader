@@ -1,10 +1,21 @@
 # TriCoreDownloader
 A GUI tool to download official Nintendo firmwares (Switch 1, Wii U, 3DS) directly from their servers.
 
-<img width="1745" height="1445" alt="Image" src="https://github.com/user-attachments/assets/9c76eea9-777b-4411-9e4a-68e802a51a4c" />
+NX (Switch 1):
 
-<img width="1742" height="1437" alt="Image" src="https://github.com/user-attachments/assets/17ab8414-0ef9-4905-8d38-8ef86ce11ae7" />
+<img width="1740" height="1446" alt="image" src="https://github.com/user-attachments/assets/25203536-38b3-4305-8cb0-842508430220" />
 
-<img width="1736" height="1432" alt="image" src="https://github.com/user-attachments/assets/b6796921-ceb1-4687-a407-87d3f5bc2b23" />
 
-Release date: Soon.
+CTR (Old+New 3DS):
+
+<img width="1732" height="1445" alt="image" src="https://github.com/user-attachments/assets/8971a5ee-cdae-4339-99d7-e17402231e78" />
+
+
+CAFE (Wii U):
+
+<img width="1737" height="1437" alt="image" src="https://github.com/user-attachments/assets/c4f12e65-9fe2-403f-91d7-e79e7806c8f2" />
+
+
+(Potential) release date: mid/late April.
+
+Stay tuned!
