@@ -15,6 +15,7 @@ CAFE (Wii U):
 
 <img width="1737" height="1437" alt="image" src="https://github.com/user-attachments/assets/c4f12e65-9fe2-403f-91d7-e79e7806c8f2" />
 
+Available fully in French and English when it is ready.
 
 (Potential) release date: mid/late April.
 
