@@ -17,6 +17,9 @@ CAFE (Wii U):
 
 Available fully in French and English when it is ready.
 
-(Potential) release date: mid/late April.
+release date: ...soon...
+
+(With everything that's happened recently, I've kind of forgotten to work on it.
+But don't worry, I haven't forgotten about it. And it will be released one day.)
 
 Stay tuned!
