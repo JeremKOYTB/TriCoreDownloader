@@ -11,7 +11,7 @@ Available fully in French and English when it is ready.
 The wait is almost over!
 
 * **Current Status:** TriCoreDownloader is nearly complete. All key tests are successful, and there are only 5-6 final details left to smooth out.
-* **Release Date:** It could officially drop in the next 2-3 days-maybe even tomorrow! 👀👀👀👀👀
+* **Release Date:** This weekend.
 
 ### ⚠️ Important Note on Version Numbers
 
