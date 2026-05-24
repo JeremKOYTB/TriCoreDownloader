@@ -11,11 +11,7 @@ Available fully in French and English when it is ready.
 The wait is almost over!
 
 * **Current Status:** TriCoreDownloader is nearly complete. All key tests are successful, and there are only 5-6 final details left to smooth out.
-* **Release Date:** Today. (but I hope not tomorrow.)
-
-### ⚠️ Important Note on Version Numbers
-
-When the release is ready, the software will indicate that it is in version **1.0.0** (or possibly **0.9.9** if it gets released faster than planned).
+* **Release Date:** sooner than you think.
 
 > **Note:** The high version numbers you have seen since the beginning of development were strictly for internal tracking and to help fix things where they stood. Do not be surprised by this version reset upon public release!
 
