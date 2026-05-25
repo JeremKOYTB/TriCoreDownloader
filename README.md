@@ -3,7 +3,7 @@
 A GUI tool to download official Nintendo firmwares (Switch 1, Wii U, 3DS) directly from their servers.
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/21c6b29d-928d-4c02-af10-1f7857dea559" width="200" alt="TriCoreDownloader" />
+  <img src="https://github.com/user-attachments/assets/9626f4d7-c06b-4c86-966e-168ef92dd213" width="200" alt="TriCoreDownloader" />
 </p>
 
 **TriCoreDownloader** is a non-profit, open-source tool for downloading, decrypting, assembling, and verifying official firmware.
