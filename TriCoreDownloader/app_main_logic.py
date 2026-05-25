@@ -23,8 +23,8 @@ from .app_utils_dialogs import exception_hook, ComboScrollFilter
 from .ui_core_layout import FirmwareAppUI
 from .audio_manager import AudioManager
 from .logos import (NX_LOGO_SVG, CTR_LOGO_WHITE_SVG, CTR_LOGO_BLACK_SVG, 
-                    CTR_LOGO_CLEAN_SVG, CAFE_LOGO_SVG, VOL_MUTE_SVG, 
-                    VOL_LOW_SVG, VOL_HIGH_SVG, RESTART_SVG, TCD_MAIN_LOGO)
+                        CTR_LOGO_CLEAN_SVG, CAFE_LOGO_SVG, VOL_MUTE_SVG, 
+                        VOL_LOW_SVG, VOL_HIGH_SVG, RESTART_SVG, TCD_MAIN_LOGO)
 from .app_downloader import DownloadManagerMixin
 from .app_ui_interactions import UiInteractionsMixin
 
@@ -355,46 +355,92 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
     def _convert_markdown_to_html(self, text):
         if not text:
             return ""
-        lines = text.split("\n")
         html_lines = []
         in_blockquote = False
-        
+        in_list = False
+        in_code = False
+        lines = text.split("\n")
         for line in lines:
             line_str = line.strip()
-            
+            if line_str.startswith("```"):
+                if in_code:
+                    html_lines.append("</pre></div>")
+                    in_code = False
+                else:
+                    if in_blockquote:
+                        html_lines.append("</blockquote>")
+                        in_blockquote = False
+                    if in_list:
+                        html_lines.append("</ul>")
+                        in_list = False
+                    html_lines.append("<div style='background-color: #2D2D36; padding: 8px; border-radius: 6px; margin: 6px 0;'><pre style='margin: 0; color: #E8E8E8; font-family: Consolas, monospace; white-space: pre-wrap;'>")
+                    in_code = True
+                continue
+            if in_code:
+                escaped = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                html_lines.append(escaped + "\n")
+                continue
             if not line_str:
                 if in_blockquote:
                     html_lines.append("</blockquote>")
                     in_blockquote = False
+                if in_list:
+                    html_lines.append("</ul>")
+                    in_list = False
                 html_lines.append("<br>")
                 continue
-                
             if line_str.startswith(">"):
                 line_str = line_str.lstrip(">").strip()
                 if not in_blockquote:
+                    if in_list:
+                        html_lines.append("</ul>")
+                        in_list = False
                     html_lines.append("<blockquote style='color: #A0A0AB; font-style: italic; margin: 4px 0; padding-left: 10px; border-left: 3px solid #4A4A55;'>")
                     in_blockquote = True
             else:
                 if in_blockquote:
                     html_lines.append("</blockquote>")
                     in_blockquote = False
-                    
-            if line_str.startswith("###"):
-                line_str = f"<h4 style='color: #FFFFFF; margin-top: 8px; margin-bottom: 4px;'>{line_str.lstrip('#').strip()}</h4>"
-            elif line_str.startswith("##") or line_str.startswith("#"):
-                line_str = f"<h3 style='color: #FFFFFF; margin-top: 10px; margin-bottom: 6px;'>{line_str.lstrip('#').strip()}</h3>"
-                
-            line_str = re.sub(r'\*\*(.*?)\*\* ', r'<b style="color: #FFFFFF;">\1</b> ', line_str)
+            if line_str.startswith("#"):
+                if in_list:
+                    html_lines.append("</ul>")
+                    in_list = False
+                match = re.match(r'^(#+)\s*(.*)', line_str)
+                if match:
+                    level = len(match.group(1))
+                    title_text = match.group(2)
+                    size = max(18 - (level * 1.5), 10)
+                    html_lines.append(f"<div style='color: #FFFFFF; font-size: {size}pt; font-weight: bold; margin-top: 12px; margin-bottom: 6px;'>{title_text}</div>")
+                    continue
+            is_list_item = line_str.startswith("- ") or line_str.startswith("* ")
+            if is_list_item:
+                line_str = line_str[2:].strip()
+                if not in_list:
+                    html_lines.append("<ul style='margin-top: 4px; margin-bottom: 4px; padding-left: 20px;'>")
+                    in_list = True
+            else:
+                if in_list:
+                    html_lines.append("</ul>")
+                    in_list = False
             line_str = re.sub(r'\*\*(.*?)\*\*', r'<b style="color: #FFFFFF;">\1</b>', line_str)
-            line_str = re.sub(r'`(.*?)`', r'<code style="background-color: #2D2D36; padding: 2px 4px; border-radius: 4px;">\1</code>', line_str)
-            
-            if line_str and not line_str.startswith("<h") and not line_str.startswith("<block"):
+            line_str = re.sub(r'__(.*?)__', r'<b style="color: #FFFFFF;">\1</b>', line_str)
+            line_str = re.sub(r'\*(.*?)\*', r'<i style="color: #E8E8E8;">\1</i>', line_str)
+            line_str = re.sub(r'_(.*?)_', r'<i style="color: #E8E8E8;">\1</i>', line_str)
+            line_str = re.sub(r'~~(.*?)~~', r'<s style="color: #8A8A95;">\1</s>', line_str)
+            line_str = re.sub(r'`(.*?)`', r'<code style="background-color: #2D2D36; padding: 2px 4px; border-radius: 4px; color: #C4A1FF;">\1</code>', line_str)
+            line_str = re.sub(r'\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color: #00A2E8; text-decoration: none;">\1</a>', line_str)
+            if is_list_item:
+                html_lines.append(f"<li style='color: #E8E8E8; margin-bottom: 2px;'>{line_str}</li>")
+            elif in_blockquote:
                 html_lines.append(f"<div>{line_str}</div>")
-            elif line_str:
-                html_lines.append(line_str)
-                
+            else:
+                html_lines.append(f"<div style='margin-bottom: 2px;'>{line_str}</div>")
         if in_blockquote:
             html_lines.append("</blockquote>")
+        if in_list:
+            html_lines.append("</ul>")
+        if in_code:
+            html_lines.append("</pre></div>")
         return "".join(html_lines)
 
     def _get_changelog_from_tag(self, releases, version_tag):
@@ -571,7 +617,7 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
             def create_svg_file(name, color, is_up):
                 path = tmp_dir + "/" + name
                 pts = "18 15 12 9 6 15" if is_up else "6 9 12 15 18 9"
-                content = f"""<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="{pts}"/></svg>"""
+                content = f"""<svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="{pts}"/></svg>"""
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(content)
                 return path
@@ -860,7 +906,7 @@ class UpdateCheckerThread(QThread):
     log_signal = pyqtSignal(str)
 
     def run(self):
-        url = "https://api.github.com/repos/JeremKOYTB/TriCoreDownloader/releases"
+        url = "[https://api.github.com/repos/JeremKOYTB/TriCoreDownloader/releases](https://api.github.com/repos/JeremKOYTB/TriCoreDownloader/releases)"
         try:
             req = urllib.request.Request(url, headers={'User-Agent': 'TriCoreDownloader-Main'})
             with urllib.request.urlopen(req, timeout=8) as response:
