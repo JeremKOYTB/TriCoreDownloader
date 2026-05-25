@@ -252,6 +252,7 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
             self.config["volume"] = val
             self._update_vol_icon(val)
 
+        self.volume_slider.valueChanged.connect(self.on_volume_changed)
         self.volume_slider.valueChanged.connect(on_main_vol_changed)
         self.volume_slider.sliderReleased.connect(
             lambda: self._play_volume_test_sound() if hasattr(self, "_play_volume_test_sound") else None
