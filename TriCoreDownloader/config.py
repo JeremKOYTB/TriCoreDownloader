@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Tuple, Dict, Any
 
 APP_NAME = "TriCoreDownloader"
-APP_VERSION = "0.9.0"
+APP_VERSION = "0.9.0.1"
 IS_STORE_PYTHON = False
 _HARD_RESET_LOCK = False
 
