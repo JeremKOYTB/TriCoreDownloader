@@ -424,9 +424,9 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
                 header_close = "</div>"
                 
             line_str = re.sub(r'`(.*?)`', r'<code style="background-color: #2D2D36; padding: 2px 4px; border-radius: 4px; color: #C4A1FF;">\1</code>', line_str)
-            line_str = re.sub(r'\*\*(.*?)\*\*', r'<b style="color: #FFFFFF;">\1</b>', line_str)
+            line_str = re.sub(r'(?<!\w)\*\*(.*?)\*\*(?!\w)', r'<b style="color: #FFFFFF;">\1</b>', line_str)
             line_str = re.sub(r'(?<!\w)__(.*?)__(?!\w)', r'<b style="color: #FFFFFF;">\1</b>', line_str)
-            line_str = re.sub(r'\*(.*?)\*', r'<i style="color: #E8E8E8;">\1</i>', line_str)
+            line_str = re.sub(r'(?<!\w)\*(.*?)\*(?!\w)', r'<i style="color: #E8E8E8;">\1</i>', line_str)
             line_str = re.sub(r'(?<!\w)_(.*?)_(?!\w)', r'<i style="color: #E8E8E8;">\1</i>', line_str)
             line_str = re.sub(r'~~(.*?)~~', r'<s style="color: #8A8A95;">\1</s>', line_str)
             line_str = re.sub(r'\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color: #00A2E8; text-decoration: none;">\1</a>', line_str)
@@ -621,7 +621,7 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
             def create_svg_file(name, color, is_up):
                 path = tmp_dir + "/" + name
                 pts = "18 15 12 9 6 15" if is_up else "6 9 12 15 18 9"
-                content = f"""<svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="{pts}"/></svg>"""
+                content = f"""<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="{pts}"/></svg>"""
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(content)
                 return path
@@ -909,10 +909,13 @@ class UpdateCheckerThread(QThread):
     log_signal = pyqtSignal(str)
 
     def run(self):
-        url = "[https://api.github.com/repos/JeremKOYTB/TriCoreDownloader/releases](https://api.github.com/repos/JeremKOYTB/TriCoreDownloader/releases)"
+        url = "https://api.github.com/repos/JeremKOYTB/TriCoreDownloader/releases"
         try:
+            proxy_handler = urllib.request.ProxyHandler({})
+            opener = urllib.request.build_opener(proxy_handler)
+            
             req = urllib.request.Request(url, headers={'User-Agent': 'TriCoreDownloader-Main'})
-            with urllib.request.urlopen(req, timeout=8) as response:
+            with opener.open(req, timeout=8) as response:
                 raw_data = response.read().decode('utf-8')
                 releases = json.loads(raw_data)
                 
