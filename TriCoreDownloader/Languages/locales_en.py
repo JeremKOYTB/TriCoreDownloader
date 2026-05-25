@@ -511,6 +511,8 @@ STRINGS_EN = {
     "log_phase1_norm": " > Downloading {0}...",
     "log_worker_dl_id_adv": " -> Downloading ID: {}...",
     "err_dl_id": "Download error for ID {0}",
+    "skip_404_title": "Warning",
+    "skip_404_msg": "TITLE: {0} NOT FOUND (404)\n\nDo you want to skip this title?\n(WARNING: Can be dangerous on a real Wii U!)",
     "log_skip_404": "[!!404!!] {0} was skipped...",
     "log_abort_404": " > Aborting (Error 404).",
     "err_abort_404": "Download aborted: Title {0} not found (404).",
