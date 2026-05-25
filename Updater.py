@@ -37,7 +37,7 @@ from TriCoreDownloader.config import APP_VERSION
 
 BASE_FONT = "\"Segoe UI Variable\", \"Segoe UI\", \"Roboto\", sans-serif"
 
-TCD_MAIN_LOGO = b"""<svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" viewBox="0 0 128 128" width="128" height="128"><rect width="128" height="128" rx="28" fill="#32323A" stroke="#4A4A54" stroke-width="4"/><path d="M64 14 L64 42" stroke="#FF3E3E" stroke-width="16" stroke-linecap="round"/><path d="M64 42 L64 66" stroke="#00A2E8" stroke-width="16" stroke-linecap="round"/><path d="M64 66 L64 88 M38 64 L64 90 L90 64" fill="none" stroke="#C4A1FF" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 82 L24 98 A 8 8 0 0 0 32 106 L96 106 A 8 8 0 0 0 104 98 L104 82" fill="none" stroke="#555560" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/></svg>"""
+TCD_MAIN_LOGO = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128"><rect width="128" height="128" rx="28" fill="#32323A" stroke="#4A4A54" stroke-width="4"/><path d="M64 14 L64 42" stroke="#FF3E3E" stroke-width="16" stroke-linecap="round"/><path d="M64 42 L64 66" stroke="#00A2E8" stroke-width="16" stroke-linecap="round"/><path d="M64 66 L64 88 M38 64 L64 90 L90 64" fill="none" stroke="#C4A1FF" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 82 L24 98 A 8 8 0 0 0 32 106 L96 106 A 8 8 0 0 0 104 98 L104 82" fill="none" stroke="#555560" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/></svg>"""
 
 THEMES = {
     "dark": {
@@ -104,7 +104,7 @@ class ReleasesFetchThread(QThread):
     finished = pyqtSignal(list, str)
 
     def run(self):
-        url = f"[https://api.github.com/repos/JeremKOYTB/TriCoreDownloader/releases?t=](https://api.github.com/repos/JeremKOYTB/TriCoreDownloader/releases?t=){int(time.time())}"
+        url = f"https://api.github.com/repos/JeremKOYTB/TriCoreDownloader/releases?t={int(time.time())}"
         try:
             req = urllib.request.Request(url, headers={'User-Agent': 'TriCoreDownloader-Updater'})
             with urllib.request.urlopen(req, timeout=10) as response:
