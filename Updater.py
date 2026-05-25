@@ -120,7 +120,7 @@ class DownloadWorkerThread(QThread):
     def __init__(self, download_url, install_dir):
         super().__init__()
         self.download_url = download_url
-        self.install_dir = install_dir
+        self.install_dir = os.path.abspath(install_dir)
 
     def run(self):
         try:
@@ -131,6 +131,8 @@ class DownloadWorkerThread(QThread):
 
             self.progress.emit("Extracting files and replacing old data...")
             extracted_files = set()
+            
+            install_dir_norm = os.path.normcase(self.install_dir)
             
             with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
                 namelist = z.namelist()
@@ -159,19 +161,21 @@ class DownloadWorkerThread(QThread):
                         continue 
 
                     target_path = os.path.abspath(os.path.join(self.install_dir, filename))
-                    if not target_path.startswith(self.install_dir):
+                    target_norm = os.path.normcase(target_path)
+                    
+                    if not target_norm.startswith(install_dir_norm):
                         continue
 
                     os.makedirs(os.path.dirname(target_path), exist_ok=True)
                     with open(target_path, "wb") as f_out:
                         f_out.write(z.read(member))
                         
-                    extracted_files.add(os.path.normpath(target_path))
+                    extracted_files.add(target_norm)
 
             self.progress.emit("Cleaning up orphaned core files...")
             
             ALLOWED_FOLDERS = ["TriCoreDownloader", "CAFE", "CTR", "NX", "Languages", "Songs"]
-            ALLOWED_ROOT_FILES = ["clean_pycache.bat", "run_TriCoreDownloader.py", "start.bat", "Updater.py"]
+            ALLOWED_ROOT_FILES = ["clean_pycache.bat", "run_TriCoreDownloader.py", "start.bat", "Updater.py", "clean_save.bat", "LICENSE", "README.md"]
             
             for folder in ALLOWED_FOLDERS:
                 folder_path = os.path.abspath(os.path.join(self.install_dir, folder))
@@ -180,8 +184,9 @@ class DownloadWorkerThread(QThread):
                     
                 for dirpath, dirnames, filenames in os.walk(folder_path, topdown=False):
                     for f in filenames:
-                        file_path = os.path.normpath(os.path.join(dirpath, f))
-                        if file_path not in extracted_files:
+                        file_path = os.path.abspath(os.path.join(dirpath, f))
+                        file_norm = os.path.normcase(file_path)
+                        if file_norm not in extracted_files:
                             try:
                                 os.remove(file_path)
                             except Exception:
@@ -194,8 +199,9 @@ class DownloadWorkerThread(QThread):
                         pass
                         
             for root_file in ALLOWED_ROOT_FILES:
-                file_path = os.path.normpath(os.path.join(self.install_dir, root_file))
-                if os.path.exists(file_path) and file_path not in extracted_files:
+                file_path = os.path.abspath(os.path.join(self.install_dir, root_file))
+                file_norm = os.path.normcase(file_path)
+                if os.path.exists(file_path) and file_norm not in extracted_files:
                     try:
                         os.remove(file_path)
                     except Exception:
@@ -760,7 +766,6 @@ if __name__ == "__main__":
     appdata_dir = os.path.join(os.environ.get("APPDATA", ""), "TriCoreDownloader")
     temp_updater = os.path.join(appdata_dir, "TempUpdater.py")
 
-    # DEV NOTE: Security Relocation matrix with Plan B synchronous verification polling
     if os.path.normcase(current_script) != os.path.normcase(temp_updater):
         relocated_successfully = False
         try:
