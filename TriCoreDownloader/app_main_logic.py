@@ -23,8 +23,8 @@ from .app_utils_dialogs import exception_hook, ComboScrollFilter
 from .ui_core_layout import FirmwareAppUI
 from .audio_manager import AudioManager
 from .logos import (NX_LOGO_SVG, CTR_LOGO_WHITE_SVG, CTR_LOGO_BLACK_SVG, 
-                        CTR_LOGO_CLEAN_SVG, CAFE_LOGO_SVG, VOL_MUTE_SVG, 
-                        VOL_LOW_SVG, VOL_HIGH_SVG, RESTART_SVG, TCD_MAIN_LOGO)
+                    CTR_LOGO_CLEAN_SVG, CAFE_LOGO_SVG, VOL_MUTE_SVG, 
+                    VOL_LOW_SVG, VOL_HIGH_SVG, RESTART_SVG, TCD_MAIN_LOGO)
 from .app_downloader import DownloadManagerMixin
 from .app_ui_interactions import UiInteractionsMixin
 
@@ -355,65 +355,57 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
     def _convert_markdown_to_html(self, text):
         if not text:
             return ""
-        html_lines = []
-        in_blockquote = False
-        in_list = False
-        in_code = False
+        
         lines = text.split("\n")
+        html_lines = []
+        in_code = False
+        in_list = False
+        in_blockquote = False
+        
         for line in lines:
             line_str = line.strip()
+            
+            # 1. Gestion des blocs de code multi-lignes (```)
             if line_str.startswith("```"):
                 if in_code:
                     html_lines.append("</pre></div>")
                     in_code = False
                 else:
-                    if in_blockquote:
-                        html_lines.append("</blockquote>")
-                        in_blockquote = False
-                    if in_list:
-                        html_lines.append("</ul>")
-                        in_list = False
                     html_lines.append("<div style='background-color: #2D2D36; padding: 8px; border-radius: 6px; margin: 6px 0;'><pre style='margin: 0; color: #E8E8E8; font-family: Consolas, monospace; white-space: pre-wrap;'>")
                     in_code = True
                 continue
+                
             if in_code:
                 escaped = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
                 html_lines.append(escaped + "\n")
                 continue
+                
+            # 2. Gestion des lignes vides
             if not line_str:
-                if in_blockquote:
-                    html_lines.append("</blockquote>")
-                    in_blockquote = False
                 if in_list:
                     html_lines.append("</ul>")
                     in_list = False
+                if in_blockquote:
+                    html_lines.append("</blockquote>")
+                    in_blockquote = False
                 html_lines.append("<br>")
                 continue
+                
+            # 3. Gestion des Blockquotes (>)
             if line_str.startswith(">"):
                 line_str = line_str.lstrip(">").strip()
                 if not in_blockquote:
-                    if in_list:
-                        html_lines.append("</ul>")
-                        in_list = False
                     html_lines.append("<blockquote style='color: #A0A0AB; font-style: italic; margin: 4px 0; padding-left: 10px; border-left: 3px solid #4A4A55;'>")
                     in_blockquote = True
             else:
                 if in_blockquote:
                     html_lines.append("</blockquote>")
                     in_blockquote = False
-            if line_str.startswith("#"):
-                if in_list:
-                    html_lines.append("</ul>")
-                    in_list = False
-                match = re.match(r'^(#+)\s*(.*)', line_str)
-                if match:
-                    level = len(match.group(1))
-                    title_text = match.group(2)
-                    size = max(18 - (level * 1.5), 10)
-                    html_lines.append(f"<div style='color: #FFFFFF; font-size: {size}pt; font-weight: bold; margin-top: 12px; margin-bottom: 6px;'>{title_text}</div>")
-                    continue
-            is_list_item = line_str.startswith("- ") or line_str.startswith("* ")
-            if is_list_item:
+                    
+            # 4. Gestion des Listes à puces (- ou *)
+            is_list_item = False
+            if line_str.startswith("- ") or line_str.startswith("* "):
+                is_list_item = True
                 line_str = line_str[2:].strip()
                 if not in_list:
                     html_lines.append("<ul style='margin-top: 4px; margin-bottom: 4px; padding-left: 20px;'>")
@@ -422,6 +414,21 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
                 if in_list:
                     html_lines.append("</ul>")
                     in_list = False
+                    
+            # 5. Gestion dynamique de toutes les tailles de titres (# jusqu'à ######)
+            is_header = False
+            header_match = re.match(r'^(#{1,6})\s+(.*)', line_str)
+            if header_match:
+                is_header = True
+                level = len(header_match.group(1))
+                line_str = header_match.group(2).strip()
+                
+                size_map = {1: "18pt", 2: "15pt", 3: "13pt", 4: "11pt", 5: "10pt", 6: "9pt"}
+                margin_top = "12px" if level <= 3 else "8px"
+                header_open = f"<div style='color: #FFFFFF; font-size: {size_map.get(level, '11pt')}; font-weight: bold; margin-top: {margin_top}; margin-bottom: 6px;'>"
+                header_close = "</div>"
+                
+            # 6. Mises en forme intra-ligne (Gras, Italique, Code court, Barré, Liens)
             line_str = re.sub(r'\*\*(.*?)\*\*', r'<b style="color: #FFFFFF;">\1</b>', line_str)
             line_str = re.sub(r'__(.*?)__', r'<b style="color: #FFFFFF;">\1</b>', line_str)
             line_str = re.sub(r'\*(.*?)\*', r'<i style="color: #E8E8E8;">\1</i>', line_str)
@@ -429,18 +436,23 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
             line_str = re.sub(r'~~(.*?)~~', r'<s style="color: #8A8A95;">\1</s>', line_str)
             line_str = re.sub(r'`(.*?)`', r'<code style="background-color: #2D2D36; padding: 2px 4px; border-radius: 4px; color: #C4A1FF;">\1</code>', line_str)
             line_str = re.sub(r'\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color: #00A2E8; text-decoration: none;">\1</a>', line_str)
-            if is_list_item:
-                html_lines.append(f"<li style='color: #E8E8E8; margin-bottom: 2px;'>{line_str}</li>")
-            elif in_blockquote:
-                html_lines.append(f"<div>{line_str}</div>")
+            
+            # 7. Assemblage de la structure de ligne
+            if is_header:
+                html_lines.append(f"{header_open}{line_str}{header_close}")
+            elif is_list_item:
+                html_lines.append(f"<li>{line_str}</li>")
             else:
-                html_lines.append(f"<div style='margin-bottom: 2px;'>{line_str}</div>")
-        if in_blockquote:
-            html_lines.append("</blockquote>")
+                html_lines.append(f"<div>{line_str}</div>")
+                
+        # Fermeture de sécurité des balises globales restées ouvertes
         if in_list:
             html_lines.append("</ul>")
+        if in_blockquote:
+            html_lines.append("</blockquote>")
         if in_code:
             html_lines.append("</pre></div>")
+            
         return "".join(html_lines)
 
     def _get_changelog_from_tag(self, releases, version_tag):
@@ -617,7 +629,7 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
             def create_svg_file(name, color, is_up):
                 path = tmp_dir + "/" + name
                 pts = "18 15 12 9 6 15" if is_up else "6 9 12 15 18 9"
-                content = f"""<svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="{pts}"/></svg>"""
+                content = f"""<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="{pts}"/></svg>"""
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(content)
                 return path
@@ -822,7 +834,6 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
                 except Exception:
                     plan_a_success = False
                     
-                # DEV NOTE: Fallback to Plan B (Direct executing) if Plan A process validation fails
                 if not plan_a_success:
                     args = [sys.executable, updater_script, "--install-dir", os.getcwd()]
                     if target_mode == "all": args.append("--view-all")
@@ -906,7 +917,7 @@ class UpdateCheckerThread(QThread):
     log_signal = pyqtSignal(str)
 
     def run(self):
-        url = "[https://api.github.com/repos/JeremKOYTB/TriCoreDownloader/releases](https://api.github.com/repos/JeremKOYTB/TriCoreDownloader/releases)"
+        url = "https://api.github.com/repos/JeremKOYTB/TriCoreDownloader/releases"
         try:
             req = urllib.request.Request(url, headers={'User-Agent': 'TriCoreDownloader-Main'})
             with urllib.request.urlopen(req, timeout=8) as response:
