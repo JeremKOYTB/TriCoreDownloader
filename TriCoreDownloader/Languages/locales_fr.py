@@ -511,6 +511,7 @@ STRINGS_FR = {
     "log_phase1_norm": " > Téléchargement {0}...",
     "log_worker_dl_id_adv": " -> Téléchargement de l'ID : {}...",
     "err_dl_id": "Erreur de téléchargement pour l'ID {0}",
+    "skip_404_msg": "TITRE : {0} NON TROUVÉ (404)\n\nVoulez-vous ignorer ce titre ?\n(ATTENTION : Peut être dangereux sur une vraie Wii U !)",
     "log_skip_404": "[!!404!!] {0} à été skip...",
     "log_abort_404": " > Annulation (Erreur 404).",
     "err_abort_404": "Téléchargement annulé : Titre {0} introuvable (404).",
