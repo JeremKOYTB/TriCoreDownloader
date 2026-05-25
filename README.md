@@ -219,8 +219,8 @@ My priority is to provide a useful, reliable tool for the preservation community
 ## Legal Disclaimer
 
 ---
-* **Trademarks & Copyrights:** All product names, logos, brands, and trademarks,
-including "Nintendo", "Nintendo Switch", "Nintendo 3DS", "Wii U", and associated console names are the sole property of their respective owners (Nintendo Co., Ltd. and its affiliates).
+
+* **Trademarks & Copyrights:** All product names, logos, brands, and trademarks, including all Nintendo-related intellectual property and console names, are the sole property of their respective owners (Nintendo Co., Ltd. and its affiliates).
 
 ---
 * **Audio & Assets:** Any audio files, sound effects, or visual assets belonging to Nintendo that are included or utilized within this software are used under fair use principles for identification and nostalgia purposes.
