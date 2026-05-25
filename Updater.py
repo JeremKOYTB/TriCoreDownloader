@@ -37,7 +37,7 @@ from TriCoreDownloader.config import APP_VERSION
 
 BASE_FONT = "\"Segoe UI Variable\", \"Segoe UI\", \"Roboto\", sans-serif"
 
-TCD_MAIN_LOGO = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128"><rect width="128" height="128" rx="28" fill="#32323A" stroke="#4A4A54" stroke-width="4"/><path d="M64 14 L64 42" stroke="#FF3E3E" stroke-width="16" stroke-linecap="round"/><path d="M64 42 L64 66" stroke="#00A2E8" stroke-width="16" stroke-linecap="round"/><path d="M64 66 L64 88 M38 64 L64 90 L90 64" fill="none" stroke="#C4A1FF" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 82 L24 98 A 8 8 0 0 0 32 106 L96 106 A 8 8 0 0 0 104 98 L104 82" fill="none" stroke="#555560" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/></svg>"""
+TCD_MAIN_LOGO = b"""<svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" viewBox="0 0 128 128" width="128" height="128"><rect width="128" height="128" rx="28" fill="#32323A" stroke="#4A4A54" stroke-width="4"/><path d="M64 14 L64 42" stroke="#FF3E3E" stroke-width="16" stroke-linecap="round"/><path d="M64 42 L64 66" stroke="#00A2E8" stroke-width="16" stroke-linecap="round"/><path d="M64 66 L64 88 M38 64 L64 90 L90 64" fill="none" stroke="#C4A1FF" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 82 L24 98 A 8 8 0 0 0 32 106 L96 106 A 8 8 0 0 0 104 98 L104 82" fill="none" stroke="#555560" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/></svg>"""
 
 THEMES = {
     "dark": {
@@ -104,7 +104,7 @@ class ReleasesFetchThread(QThread):
     finished = pyqtSignal(list, str)
 
     def run(self):
-        url = f"https://api.github.com/repos/JeremKOYTB/TriCoreDownloader/releases?t={int(time.time())}"
+        url = f"[https://api.github.com/repos/JeremKOYTB/TriCoreDownloader/releases?t=](https://api.github.com/repos/JeremKOYTB/TriCoreDownloader/releases?t=){int(time.time())}"
         try:
             req = urllib.request.Request(url, headers={'User-Agent': 'TriCoreDownloader-Updater'})
             with urllib.request.urlopen(req, timeout=10) as response:
@@ -261,19 +261,28 @@ class UpdaterWindow(QMainWindow):
         return QIcon()
 
     def _convert_markdown_to_html(self, text):
-        if not text:
-            return ""
-        lines = text.split("\n")
-        html_lines = []
-        in_blockquote = False
+        if not text: return ""
+        html_lines, in_blockquote, in_list, in_code = [], False, False, False
         
-        for line in lines:
+        for line in text.split("\n"):
             line_str = line.strip()
             
+            if line_str.startswith("```"):
+                if in_code:
+                    html_lines.append("</pre></div>")
+                    in_code = False
+                else:
+                    html_lines.append("<div style='background-color: #2D2D36; padding: 8px; border-radius: 6px; margin: 6px 0;'><pre style='margin: 0; color: #E8E8E8; font-family: Consolas, monospace; white-space: pre-wrap;'>")
+                    in_code = True
+                continue
+                
+            if in_code:
+                html_lines.append(f"<div>{line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')}</div>")
+                continue
+                
             if not line_str:
-                if in_blockquote:
-                    html_lines.append("</blockquote>")
-                    in_blockquote = False
+                if in_blockquote: html_lines.append("</blockquote>"); in_blockquote = False
+                if in_list: html_lines.append("</ul>"); in_list = False
                 html_lines.append("<br>")
                 continue
                 
@@ -282,27 +291,41 @@ class UpdaterWindow(QMainWindow):
                 if not in_blockquote:
                     html_lines.append("<blockquote style='color: #A0A0AB; font-style: italic; margin: 4px 0; padding-left: 10px; border-left: 3px solid #4A4A55;'>")
                     in_blockquote = True
-            else:
-                if in_blockquote:
-                    html_lines.append("</blockquote>")
-                    in_blockquote = False
-                    
-            if line_str.startswith("###"):
-                line_str = f"<h4 style='color: #FFFFFF; margin-top: 8px; margin-bottom: 4px;'>{line_str.lstrip('#').strip()}</h4>"
-            elif line_str.startswith("##") or line_str.startswith("#"):
-                line_str = f"<h3 style='color: #FFFFFF; margin-top: 10px; margin-bottom: 6px;'>{line_str.lstrip('#').strip()}</h3>"
+            elif in_blockquote:
+                html_lines.append("</blockquote>"); in_blockquote = False
                 
-            line_str = re.sub(r'\*\*(.*?)\*\* ', r'<b style="color: #FFFFFF;">\1</b> ', line_str)
+            is_list = False
+            if line_str.startswith("- ") or line_str.startswith("* "):
+                is_list = True
+                line_str = line_str[2:].strip()
+                if not in_list:
+                    html_lines.append("<ul style='margin-top: 4px; margin-bottom: 4px; padding-left: 20px;'>")
+                    in_list = True
+            elif in_list:
+                html_lines.append("</ul>"); in_list = False
+
             line_str = re.sub(r'\*\*(.*?)\*\*', r'<b style="color: #FFFFFF;">\1</b>', line_str)
-            line_str = re.sub(r'`(.*?)`', r'<code style="background-color: #2D2D36; padding: 2px 4px; border-radius: 4px;">\1</code>', line_str)
+            line_str = re.sub(r'__(.*?)__', r'<b style="color: #FFFFFF;">\1</b>', line_str)
+            line_str = re.sub(r'\*(.*?)\*', r'<i style="color: #E8E8E8;">\1</i>', line_str)
+            line_str = re.sub(r'_(.*?)_', r'<i style="color: #E8E8E8;">\1</i>', line_str)
+            line_str = re.sub(r'~~(.*?)~~', r'<s style="color: #8A8A95;">\1</s>', line_str)
+            line_str = re.sub(r'`(.*?)`', r'<code style="background-color: #2D2D36; padding: 2px 4px; border-radius: 4px; color: #C4A1FF;">\1</code>', line_str)
+            line_str = re.sub(r'\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color: #00A2E8; text-decoration: none;">\1</a>', line_str)
             
-            if line_str and not line_str.startswith("<h") and not line_str.startswith("<block"):
-                html_lines.append(f"<div>{line_str}</div>")
-            elif line_str:
-                html_lines.append(line_str)
-                
-        if in_blockquote:
-            html_lines.append("</blockquote>")
+            if line_str.startswith("#"):
+                match = re.match(r'^(#+)\s*(.*)', line_str)
+                if match:
+                    size = max(18 - (len(match.group(1)) * 2), 11)
+                    html_lines.append(f"<div style='color: #FFFFFF; font-size: {size}pt; font-weight: bold; margin-top: 10px; margin-bottom: 6px;'>{match.group(2)}</div>")
+                    continue
+                    
+            if is_list: html_lines.append(f"<li>{line_str}</li>")
+            elif line_str: html_lines.append(f"<div>{line_str}</div>")
+
+        if in_blockquote: html_lines.append("</blockquote>")
+        if in_list: html_lines.append("</ul>")
+        if in_code: html_lines.append("</pre></div>")
+            
         return "".join(html_lines)
 
     def init_ui(self):
