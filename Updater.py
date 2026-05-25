@@ -104,7 +104,7 @@ class ReleasesFetchThread(QThread):
     finished = pyqtSignal(list, str)
 
     def run(self):
-        url = "https://api.github.com/repos/JeremKOYTB/TriCoreDownloader/releases"
+        url = f"https://api.github.com/repos/JeremKOYTB/TriCoreDownloader/releases?t={int(time.time())}"
         try:
             req = urllib.request.Request(url, headers={'User-Agent': 'TriCoreDownloader-Updater'})
             with urllib.request.urlopen(req, timeout=10) as response:
@@ -336,10 +336,19 @@ class UpdaterWindow(QMainWindow):
         self.status_lbl = QLabel("Checking available system versions...", card_frame)
         card_layout.addWidget(self.status_lbl)
         
+        combo_layout = QHBoxLayout()
+        combo_layout.setContentsMargins(0, 0, 0, 0)
+        
         self.version_combo = QComboBox(card_frame)
         self.version_combo.setEnabled(False)
         self.version_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        card_layout.addWidget(self.version_combo)
+        combo_layout.addWidget(self.version_combo)
+        
+        self.btn_refresh = QPushButton("🔄", card_frame)
+        self.btn_refresh.clicked.connect(self.refresh_data)
+        combo_layout.addWidget(self.btn_refresh)
+        
+        card_layout.addLayout(combo_layout)
         
         self.warn_lbl = QLabel("", card_frame)
         self.warn_lbl.setWordWrap(True)
@@ -510,6 +519,15 @@ class UpdaterWindow(QMainWindow):
             self.lbl_warning_symbol.setText("")
         QTimer.singleShot(10, self.adjustSize)
 
+    def refresh_data(self):
+        if hasattr(self, 'btn_refresh'):
+            self.btn_refresh.setEnabled(False)
+        self.status_lbl.setText("Refreshing data from GitHub...")
+        self.version_combo.clear()
+        self.version_combo.setEnabled(False)
+        self.btn_execute.setEnabled(False)
+        self.fetch_all_releases()
+
     def toggle_beta_mode(self, state):
         self.version_combo.clear()
         self.set_warning("")
@@ -533,6 +551,8 @@ class UpdaterWindow(QMainWindow):
     def process_releases(self, data, error_str):
         if error_str:
             self.status_lbl.setText(f"API Connection Error: {error_str}")
+            if hasattr(self, 'btn_refresh'):
+                self.btn_refresh.setEnabled(True)
             return
             
         self.releases_data = data
@@ -571,18 +591,24 @@ class UpdaterWindow(QMainWindow):
                 self.status_lbl.setText("Automated structural beta deployment sequence triggered...")
                 QTimer.singleShot(300, self.start_installation)
             elif self.force_view_all_mode:
-                self.beta_checkbox.setChecked(True)
+                self.version_combo.setCurrentIndex(0)
             else:
                 if data[0].get("prerelease", False) and first_stable_idx != -1:
                     self.version_combo.setCurrentIndex(first_stable_idx)
                 else:
                     self.version_combo.setCurrentIndex(0)
+                    
+            if self.beta_checkbox.isChecked():
+                self.toggle_beta_mode(Qt.CheckState.Checked.value)
         else:
             self.status_lbl.setText("No public release distributions found.")
+            
+        if hasattr(self, 'btn_refresh'):
+            self.btn_refresh.setEnabled(True)
         self.adjustSize()
 
     def fetch_beta_source(self):
-        url = "https://raw.githubusercontent.com/JeremKOYTB/TriCoreDownloader/refs/heads/main/TriCoreDownloader/config.py"
+        url = f"https://raw.githubusercontent.com/JeremKOYTB/TriCoreDownloader/refs/heads/main/TriCoreDownloader/config.py?t={int(time.time())}"
         try:
             req = urllib.request.Request(url, headers={'User-Agent': 'TriCoreDownloader-Updater'})
                 
@@ -609,6 +635,9 @@ class UpdaterWindow(QMainWindow):
         except Exception as e:
             self.set_warning(f"Failed to fetch main branch metadata matrix: {e}")
             self.btn_execute.setEnabled(False)
+            
+        if hasattr(self, 'btn_refresh'):
+            self.btn_refresh.setEnabled(True)
         self.adjustSize()
 
     def on_version_changed_index(self, index):
@@ -661,6 +690,8 @@ class UpdaterWindow(QMainWindow):
         self.btn_execute.setEnabled(False)
         self.btn_cancel.setEnabled(False)
         self.beta_checkbox.setEnabled(False)
+        if hasattr(self, 'btn_refresh'):
+            self.btn_refresh.setEnabled(False)
         
         self.worker = DownloadWorkerThread(download_url, self.install_dir)
         self.worker.progress.connect(self.status_lbl.setText)
@@ -695,6 +726,8 @@ class UpdaterWindow(QMainWindow):
             self.btn_execute.setEnabled(True)
             self.btn_cancel.setEnabled(True)
             self.beta_checkbox.setEnabled(True)
+            if hasattr(self, 'btn_refresh'):
+                self.btn_refresh.setEnabled(True)
 
     def handle_cancel(self, *args):
         box = QMessageBox(self)
@@ -724,7 +757,7 @@ class MainBranchCommitFetchThread(QThread):
     finished = pyqtSignal(str)
 
     def run(self):
-        url = "https://api.github.com/repos/JeremKOYTB/TriCoreDownloader/commits/main"
+        url = f"https://api.github.com/repos/JeremKOYTB/TriCoreDownloader/commits/main?t={int(time.time())}"
         try:
             req = urllib.request.Request(url, headers={'User-Agent': 'TriCoreDownloader-Updater'})
                 
