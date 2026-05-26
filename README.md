@@ -57,13 +57,17 @@ If you have any doubts, do not download it, or put it in a VM as a last resort.
 
 8. **Can TriCoreDownloader bypass 404 errors?**
 
-**NO.** It cannot bypass a 404 error. If you encounter a 404 error, it simply means the file does not exist on Nintendo's servers.
+**NO**. It cannot bypass a 404 error. If you encounter a 404 error, it simply means the file does not exist on Nintendo's servers.
 
-Technically, a 404 response indicates that the server cannot find the requested resource. So, ITS NORMAL! (Specifically for the Wii U title version 1.x.x...!)
-Because TriCoreDownloader performs a direct request to these official servers, it cannot magically retrieve or "force" a download for content that is missing or has been removed from the source.
-The tool cannot download what does not exist, so please stop sending me messages on Discord or Twitter about this;
-it is not a bug in the software, but a ""limitation"" of the server's availability for that specific firmware version.
+Technically, a 404 response indicates that the server cannot find the requested resource.
+Because TriCoreDownloader performs a direct request to these official servers, it cannot magically retrieve content that is missing.
 
+This is specifically relevant for Wii U titles in the 1.x.x range.
+Since the YLS8 database does not record the specific version or the number of titles available for this range (1.0.0 to 1.9.9), TriCoreDownloader cannot determine the correct version.
+Consequently, to ensure the process still functions, the tool automatically defaults to downloading all titles as "v0".
+
+If you see a 404 error, it is because the file does not exist on the server. 
+Please stop sending me messages on Discord or Twitter about this; it is not a bug, but a necessary technical constraint.
 
 9. **How do I provide useful, clear, and effective feedback?**
     
