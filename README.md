@@ -12,7 +12,7 @@ It is designed for software preservation, enabling you to install files on eithe
 
 ---
 
-# FAQ...
+# FAQ
 
 Before contacting support or opening an issue, please read this section **carefully**:
 
@@ -56,9 +56,14 @@ Once again, check the code; I have not encrypted anything or done anything else.
 If you have any doubts, do not download it, or put it in a VM as a last resort.
 
 8. **Can TriCoreDownloader bypass 404 errors?**
-   
-**NO.** It cannot bypass a 404 error. If you encounter a 404 error, it simply means the file does not exist on the servers.
-The tool cannot download what does not exist, so please stop sending me messages on Discord or Twitter about this.
+
+**NO.** It cannot bypass a 404 error. If you encounter a 404 error, it simply means the file does not exist on Nintendo's servers.
+
+Technically, a 404 response indicates that the server cannot find the requested resource. So, ITS NORMAL! (Specifically for the Wii U title version 1.x.x...!)
+Because TriCoreDownloader performs a direct request to these official servers, it cannot magically retrieve or "force" a download for content that is missing or has been removed from the source.
+The tool cannot download what does not exist, so please stop sending me messages on Discord or Twitter about this;
+it is not a bug in the software, but a ""limitation"" of the server's availability for that specific firmware version.
+
 
 9. **How do I provide useful, clear, and effective feedback?**
     
