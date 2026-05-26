@@ -10,6 +10,9 @@ import shutil
 import urllib.request
 import urllib.error
 import time
+import ssl
+
+ssl._create_default_https_context = ssl._create_unverified_context
 
 from PyQt6.QtWidgets import (QApplication, QMessageBox, QWidget, QGraphicsOpacityEffect, 
                              QDialog, QComboBox, QHBoxLayout, QVBoxLayout, QSlider, QLabel, 
