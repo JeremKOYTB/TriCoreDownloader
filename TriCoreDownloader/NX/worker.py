@@ -56,9 +56,6 @@ class DownloaderWorker(QThread, WorkerOperations):
         ]
         self.active_cdn_idx = 0
 
-        self.spin_idx = 0
-        self.spinner_frames = [""]
-
         self.use_aria2c = self.config.get("use_aria2c", False)
         self.aria2c_path = self.config.get("aria2c_path", "") if self.use_aria2c else None
 
@@ -128,12 +125,7 @@ class DownloaderWorker(QThread, WorkerOperations):
         bars = int((current / total) * 20) if total > 0 else 20
         bar_str = "█" * bars + "░" * (20 - bars)
         
-        spin_char = "✓"
-        if current < total:
-            spin_char = self.spinner_frames[self.spin_idx % len(self.spinner_frames)]
-            self.spin_idx += 1
-            
-        msg = f"{prefix} {spin_char} [{bar_str}] {pct}%"
+        msg = f"{prefix} [{bar_str}] {pct:>3}%"
         msg = self.sanitize_log(msg)
         
         if is_first: self.log_signal.emit(msg)
@@ -503,7 +495,7 @@ class DownloaderWorker(QThread, WorkerOperations):
                     crc = 0
                     with open(full, "rb") as src, zf.open(zinfo, "w") as dest:
                         while True:
-                            chunk = src.read(4 * 1024 * 1024)
+                            chunk = src.read(4194304)
                             if not chunk:
                                 break
                             crc = binascii.crc32(chunk, crc)
@@ -528,7 +520,7 @@ class DownloaderWorker(QThread, WorkerOperations):
             else:
                 h_sha256 = hashlib.sha256()
                 with open(out_zip, "rb") as f:
-                    for chunk in iter(lambda: f.read(1024 * 1024), b""): 
+                    for chunk in iter(lambda: f.read(4194304), b""): 
                         h_sha256.update(chunk)
                 zip_sha256 = h_sha256.hexdigest()
                 

@@ -263,7 +263,7 @@ def build_cia(title_id: str, tmd_data: bytes, cetk_data: bytes, app_folder: Path
                 with open(app_path, "rb") as f_app:
                     while True:
                         if is_stopped_cb and is_stopped_cb(): return False
-                        chunk = f_app.read(65536)
+                        chunk = f_app.read(4194304)
                         if not chunk: break
                         f_out.write(chunk)
                 

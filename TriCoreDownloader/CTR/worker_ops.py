@@ -2,7 +2,9 @@ import csv
 import re
 import struct
 import time
+import stat
 import requests
+from requests.adapters import HTTPAdapter
 from pathlib import Path
 import urllib3
 
@@ -18,51 +20,61 @@ CDNS = [
     "https://nus.cdn.shop.wii.com/ccs/download"             
 ]
 
+SHARED_SESSION = requests.Session()
+_adapter = HTTPAdapter(pool_connections=32, pool_maxsize=32, max_retries=3, pool_block=False)
+SHARED_SESSION.mount('http://', _adapter)
+SHARED_SESSION.mount('https://', _adapter)
+SHARED_SESSION.verify = False
+SHARED_SESSION.headers.update({'User-Agent': 'Nintendo 3DS (CTR-001)'})
+
 def parse_fw_string(fw_str: str) -> tuple:
     match = re.search(r"(\d+)\.(\d+)\.(\d+)-(\d+)", fw_str)
     if match: return tuple(int(x) for x in match.groups())
     return (0, 0, 0, 0)
 
+def _safe_unlink(path: Path):
+    if path.exists():
+        try:
+            path.unlink()
+        except PermissionError:
+            try:
+                path.chmod(stat.S_IWRITE)
+                path.unlink()
+            except Exception:
+                pass
+        except OSError:
+            pass
+
 def download_in_memory(url: str, is_stopped_cb=None, retries=3, log_cb=None, T_cb=None, adv_logs=False) -> tuple:
-    user_agent = 'Nintendo 3DS (CTR-001)'
-    headers = {'User-Agent': user_agent}
-    session = requests.Session()
-    
     for attempt in range(retries):
         if adv_logs and log_cb and T_cb:
-            log_cb(T_cb("log_http_req").format(url, user_agent, attempt + 1, retries))
+            log_cb(T_cb("log_http_req").format(url, 'Nintendo 3DS (CTR-001)', attempt + 1, retries))
             
         try:
-            r = session.get(url, headers=headers, timeout=10, verify=False)
+            r = SHARED_SESSION.get(url, timeout=10)
             status = r.status_code
             
             if is_stopped_cb and is_stopped_cb():
-                session.close()
                 return None, "STOPPED"
                 
             if status == 200:
                 if adv_logs and log_cb and T_cb:
                     log_cb(T_cb("log_http_res").format(status, len(r.content)))
-                data = r.content
-                session.close()
-                return data, status
+                return r.content, status
             else:
                 if adv_logs and log_cb and T_cb:
                     log_cb(T_cb("log_http_err").format(status, r.reason))
                 if attempt == retries - 1:
-                    session.close()
                     return None, status
                     
         except Exception as e:
             if adv_logs and log_cb and T_cb:
                 log_cb(T_cb("log_http_fail").format(e))
             if attempt == retries - 1:
-                session.close()
                 return None, str(e)
             
         time.sleep(1)
         
-    session.close()
     return None, "TIMEOUT"
 
 def get_yls_db(sys_type: str, is_stopped_cb=None) -> dict:
@@ -144,11 +156,8 @@ def download_raw_files(title_id: str, output_dir: Path, version: int, T_cb, is_s
     servers_to_try = [successful_base_url] if successful_base_url else []
     servers_to_try += [f"{cdn}/{title_id}" for cdn in CDNS if f"{cdn}/{title_id}" not in servers_to_try]
 
-    session = requests.Session()
-    
     for cid in c_ids:
         if is_stopped_cb and is_stopped_cb():
-            session.close()
             return False, "STOPPED"
         content_path = output_dir / cid
         fragment_downloaded = False
@@ -159,25 +168,22 @@ def download_raw_files(title_id: str, output_dir: Path, version: int, T_cb, is_s
                     req_url = f"{base_url}/{cid}"
                     if advanced_logs and log_cb: log_cb(T_cb("log_req_fragment").format(req_url))
                     
-                    headers = {'User-Agent': 'Nintendo 3DS (CTR-001)'}
-                    r = session.get(req_url, headers=headers, stream=True, timeout=15, verify=False)
-                    
-                    if r.status_code == 200:
-                        with open(content_path, "wb") as f:
-                            for chunk in r.iter_content(chunk_size=65536):
-                                if is_stopped_cb and is_stopped_cb():
-                                    f.close()
-                                    session.close()
-                                    return False, "STOPPED"
-                                f.write(chunk)
-                                
-                        fragment_downloaded = True
-                        if advanced_logs and log_cb: log_cb(T_cb("log_frag_saved").format(content_path.stat().st_size))
-                        break
-                    else:
-                        last_error = r.status_code
-                        if advanced_logs and log_cb: log_cb(T_cb("err_frag_http").format(r.status_code, req_url))
-                        time.sleep(1)
+                    with SHARED_SESSION.get(req_url, stream=True, timeout=15) as r:
+                        if r.status_code == 200:
+                            with open(content_path, "wb") as f:
+                                for chunk in r.iter_content(chunk_size=4194304):
+                                    if is_stopped_cb and is_stopped_cb():
+                                        return False, "STOPPED"
+                                    if chunk:
+                                        f.write(chunk)
+                            
+                            fragment_downloaded = True
+                            if advanced_logs and log_cb: log_cb(T_cb("log_frag_saved").format(content_path.stat().st_size))
+                            break
+                        else:
+                            last_error = r.status_code
+                            if advanced_logs and log_cb: log_cb(T_cb("err_frag_http").format(r.status_code, req_url))
+                            time.sleep(1)
                 except Exception as e:
                     last_error = str(e)
                     if advanced_logs and log_cb: log_cb(T_cb("err_frag_fail").format(e))
@@ -185,10 +191,8 @@ def download_raw_files(title_id: str, output_dir: Path, version: int, T_cb, is_s
             if fragment_downloaded: break
 
         if not fragment_downloaded: 
-            session.close()
             return False, last_error
 
-    session.close()
     return True, 200
 
 def verify_integrity(title_id: str, output_dir: Path, T_cb, is_stopped_cb=None, log_cb=None, advanced_logs=False) -> bool:
@@ -248,16 +252,13 @@ def pack_cia(title_id: str, tmp_title_dir: Path, final_out_dir: Path, T_cb, boot
     )
     
     if not success: 
-        if cia_path.exists():
-            try: cia_path.unlink()
-            except OSError: pass
+        _safe_unlink(cia_path)
         return False
 
     is_valid, msg = verify_built_cia(cia_path, T_cb, log_cb=log_cb, advanced_logs=advanced_logs)
     if not is_valid:
         if log_cb: log_cb(T_cb("err_pack_cia").format(msg))
-        try: cia_path.unlink(missing_ok=True)
-        except OSError: pass
+        _safe_unlink(cia_path)
         return False
     elif advanced_logs and log_cb:
         log_cb(T_cb("log_pack_success").format(cia_path.name))

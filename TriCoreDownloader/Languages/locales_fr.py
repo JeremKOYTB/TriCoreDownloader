@@ -578,6 +578,11 @@ STRINGS_FR = {
     "log_debug_tmd_info": "[DEBUG] Title ID: {0:016X} | Version: {1} | Contenus: {2}",
     "log_debug_content": "[DEBUG]   -> Contenu: {0:08X} | Index: {1} | Type: 0x{2:04X} | Taille: {3} bytes",
     "log_debug_key_check": "[DEBUG] Vérification de la clé commune...",
+    "err_json_corrupted": "Fichier JSON corrompu ou mal formaté : {}",
+    "err_file_delete_fail": "[ATTENTION] Impossible de supprimer le fichier {} : {}",
+    "log_ops_cert_cached": "[CDN] Certificat par défaut mis en cache avec succès. Longueur : {}",
+    "err_ops_cert_fail": "[ATTENTION] Échec de la récupération du certificat (Tentative {}) : {}",
+    "err_ops_http_404": "[ERREUR CDN] HTTP 404 : Fichier introuvable sur le serveur : {}",
 
     # ==========================================
     # --- 11. LOGS : MOTEUR CTR (3DS) ---

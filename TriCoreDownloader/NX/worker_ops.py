@@ -2,12 +2,26 @@ import os
 import time
 import hashlib
 import subprocess
+import stat
 import concurrent.futures
-import re
 
 SUBPROCESS_FLAGS = {"creationflags": 0x08000000} if os.name == "nt" else {}
 
 class WorkerOperations:
+
+    def _safe_unlink(self, path):
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except PermissionError:
+                try:
+                    os.chmod(path, stat.S_IWRITE)
+                    os.remove(path)
+                except Exception:
+                    pass
+            except OSError:
+                pass
+
     def nin_request(self, method, url, headers=None):
         if headers is None: headers = {}
         headers.update({"User-Agent": self.user_agent or "NintendoSDK Firmware/UNKNOWN"})
@@ -70,28 +84,28 @@ class WorkerOperations:
         for attempt in range(max_retries):
             try:
                 print(f"[NX OPS] Internal Download: {os.path.basename(out)} (Attempt {attempt+1}/{max_retries})")
-                resp = self.http_session.get(url, headers={"User-Agent": self.user_agent}, stream=True, timeout=15)
-                resp.raise_for_status()
-                
-                h = hashlib.sha256()
-                chunk_count = 0
-                chunk_size = 1024 * 1024
-                
-                with open(out, "wb") as f:
-                    for chunk in resp.iter_content(chunk_size):
-                        if not self.is_running: raise RuntimeError("STOPPED")
-                        if chunk: 
-                            h.update(chunk)
-                            f.write(chunk)
-                            chunk_count += 1
-                            
-                if not self.is_running: raise RuntimeError("STOPPED")
-                
-                if fhash is not None:
-                    computed = h.hexdigest()
-                    if computed != fhash.lower():
-                        print(f"[NX OPS ERROR] Inline hash mismatch on {os.path.basename(out)}. Got {computed}, Expected {fhash.lower()}")
-                        raise ValueError("HASH_MISMATCH")
+                with self.http_session.get(url, headers={"User-Agent": self.user_agent}, stream=True, timeout=15) as resp:
+                    resp.raise_for_status()
+                    
+                    h = hashlib.sha256()
+                    chunk_count = 0
+                    chunk_size = 4194304
+                    
+                    with open(out, "wb") as f:
+                        for chunk in resp.iter_content(chunk_size):
+                            if not self.is_running: raise RuntimeError("STOPPED")
+                            if chunk: 
+                                h.update(chunk)
+                                f.write(chunk)
+                                chunk_count += 1
+                                
+                    if not self.is_running: raise RuntimeError("STOPPED")
+                    
+                    if fhash is not None:
+                        computed = h.hexdigest()
+                        if computed != fhash.lower():
+                            print(f"[NX OPS ERROR] Inline hash mismatch on {os.path.basename(out)}. Got {computed}, Expected {fhash.lower()}")
+                            raise ValueError("HASH_MISMATCH")
 
                 self.log_adv(self.T("log_dl_stream_done").format(chunk_count))
                 return 
@@ -101,9 +115,7 @@ class WorkerOperations:
                 print(f"[NX OPS WARNING] Download interrupted on {os.path.basename(out)}: {e}")
                 self.log_adv(self.T("log_dl_err_retry").format(attempt + 1, max_retries, os.path.basename(out), str(e)))
                 
-                if os.path.exists(out): 
-                    try: os.remove(out)
-                    except: pass
+                self._safe_unlink(out)
                     
                 if attempt < max_retries - 1:
                     time.sleep(1.5)
@@ -224,7 +236,7 @@ class WorkerOperations:
         else:
             h = hashlib.sha256()
             with open(path, "rb") as f:
-                for chunk in iter(lambda: f.read(1024 * 1024), b""): 
+                for chunk in iter(lambda: f.read(4194304), b""): 
                     h.update(chunk)
             computed_hash = h.hexdigest()
             

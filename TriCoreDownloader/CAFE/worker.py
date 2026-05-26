@@ -70,8 +70,8 @@ class CafeDownloaderWorker(QThread):
     def _generate_bar(self, current, total, length=20):
         percent = current / total if total > 0 else 1
         filled = int(length * percent)
-        bar = '█' * filled + ' ' * (length - filled)
-        return f"[{bar}] {int(percent * 100)}%"
+        bar = '█' * filled + '░' * (length - filled)
+        return f"[{bar}] {int(percent * 100):>3}%"
 
     def _cleanup_partial_files(self):
         try:
@@ -113,8 +113,12 @@ class CafeDownloaderWorker(QThread):
             if not self.titles_json_path.exists():
                 raise FileNotFoundError(self.T("err_titles_json_missing"))
 
-            with open(self.titles_json_path, "r", encoding="utf-8") as f:
-                titles_data = json.load(f)
+            try:
+                with open(self.titles_json_path, "r", encoding="utf-8") as f:
+                    titles_data = json.load(f)
+            except json.JSONDecodeError as e:
+                print(self.T("err_json_corrupted").format(str(e)))
+                raise RuntimeError(self.T("err_json_corrupted").format(str(e)))
 
             otp_input = self.config.get("otp_path", "").strip()
             common_key = get_common_key(otp_input, self.T, self.debug_log)
@@ -209,7 +213,7 @@ class CafeDownloaderWorker(QThread):
                 msg_dl_norm = self.T("log_phase1_norm").format(title_type).strip()
 
                 if adv_logs: self.log_signal.emit(msg_dl_adv)
-                else: self.log_signal.emit(f" {msg_dl_norm} {self._generate_bar(0, total_tids)}")
+                else: self.log_signal.emit(f" {msg_dl_norm}   {self._generate_bar(0, total_tids)}")
 
                 for i, tid in enumerate(all_tids):
                     if not self._is_running: break
@@ -218,7 +222,7 @@ class CafeDownloaderWorker(QThread):
                     if adv_logs:
                         self.log_signal.emit(self.T("log_worker_dl_id_adv").format(tid))
                     else:
-                        self.log_replace_signal.emit(f" {msg_dl_norm} {self._generate_bar(i + 1, total_tids)}")
+                        self.log_replace_signal.emit(f" {msg_dl_norm}   {self._generate_bar(i + 1, total_tids)}")
                     
                     target_ver = title_versions.get(tid.lower())
                     
@@ -233,7 +237,7 @@ class CafeDownloaderWorker(QThread):
                                 global_current_step += 1
                                 self.progress_signal.emit(global_current_step, global_total_steps)
                                 if not adv_logs:
-                                    self.log_signal.emit(f" {msg_dl_norm} {self._generate_bar(i + 1, total_tids)}")
+                                    self.log_signal.emit(f" {msg_dl_norm}   {self._generate_bar(i + 1, total_tids)}")
                                 continue
 
                             self._skip_choice = None
@@ -253,7 +257,7 @@ class CafeDownloaderWorker(QThread):
                                 global_current_step += 1
                                 self.progress_signal.emit(global_current_step, global_total_steps)
                                 if not adv_logs:
-                                    self.log_signal.emit(f" {msg_dl_norm} {self._generate_bar(i + 1, total_tids)}")
+                                    self.log_signal.emit(f" {msg_dl_norm}   {self._generate_bar(i + 1, total_tids)}")
                                 continue
                             else:
                                 self.log_signal.emit(self.T("log_abort_404"))
@@ -273,7 +277,7 @@ class CafeDownloaderWorker(QThread):
                 msg_vr_norm = self.T("log_phase2_norm").format(title_type).strip()
 
                 if adv_logs: self.log_signal.emit(msg_vr_adv)
-                else: self.log_signal.emit(f" {msg_vr_norm} {self._generate_bar(0, total_tids)}")
+                else: self.log_signal.emit(f" {msg_vr_norm}   {self._generate_bar(0, total_tids)}")
                     
                 for i, tid in enumerate(all_tids):
                     if not self._is_running: break
@@ -288,7 +292,7 @@ class CafeDownloaderWorker(QThread):
                     if adv_logs:
                         self.log_signal.emit(self.T("log_worker_verify_id_adv").format(tid))
                     else:
-                        self.log_replace_signal.emit(f" {msg_vr_norm} {self._generate_bar(i + 1, total_tids)}")
+                        self.log_replace_signal.emit(f" {msg_vr_norm}   {self._generate_bar(i + 1, total_tids)}")
                     
                     if not verify_title_integrity(tid, str(work_dir), common_key, self.T, self.is_running, self.debug_log):
                         if self._is_running: raise RuntimeError(self.T("err_integ_id").format(tid))
@@ -309,7 +313,7 @@ class CafeDownloaderWorker(QThread):
                     msg_ex_norm = self.T("log_phase3_norm").format(title_type).strip()
 
                     if adv_logs: self.log_signal.emit(msg_ex_adv)
-                    else: self.log_signal.emit(f" {msg_ex_norm} {self._generate_bar(0, total_tids)}")
+                    else: self.log_signal.emit(f" {msg_ex_norm}   {self._generate_bar(0, total_tids)}")
                         
                     for i, tid in enumerate(all_tids):
                         if not self._is_running: break
@@ -324,7 +328,7 @@ class CafeDownloaderWorker(QThread):
                         if adv_logs:
                             self.log_signal.emit(self.T("log_worker_extract_id_adv").format(tid))
                         else:
-                            self.log_replace_signal.emit(f" {msg_ex_norm} {self._generate_bar(i + 1, total_tids)}")
+                            self.log_replace_signal.emit(f" {msg_ex_norm}   {self._generate_bar(i + 1, total_tids)}")
                         
                         clean_tid = tid.replace("-", "").replace("/", "").replace("\\", "").strip()
 

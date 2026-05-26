@@ -3,6 +3,7 @@ import re
 import shutil
 import time
 import inspect
+import json
 import traceback
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -27,7 +28,7 @@ class CtrDownloaderWorker(QThread):
         self.is_new_3ds = is_new_3ds
         self.config = config
         self._is_stopped = False
-        self.max_workers = 4 
+        self.max_workers = 24 
         self.lang = self.config.get("lang", "en")
         
         self._current_out_dir = None
@@ -72,7 +73,7 @@ class CtrDownloaderWorker(QThread):
         percent = max(0, min(100, percent))
         filled = int((percent / 100) * width) if width > 0 else 0
         bar = '█' * filled + '░' * (width - filled)
-        return f" {prefix} [{bar}] {percent}%"
+        return f" {prefix} [{bar}] {int(percent):>3}%"
 
     def run(self):
         try:

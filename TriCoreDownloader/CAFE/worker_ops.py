@@ -24,6 +24,7 @@ CDN_HOSTS = [
     "ccs.cdn.wup.shop.nintendo.net"
 ]
 cdn_lock = threading.Lock()
+cert_lock = threading.Lock()
 active_cdn_idx = 0
 
 BASE_URL = "http://ccs.cdn.c.shop.nintendowifi.net/ccs/download"
@@ -40,13 +41,17 @@ def apply_sticky_cdn(url):
             return url.replace(host, current_host)
     return url
 
-def force_remove(path):
+def force_remove(path, T_cb=lambda x: x):
     if os.path.exists(path):
         try: 
             os.remove(path)
         except PermissionError:
-            os.chmod(path, stat.S_IWRITE)
-            os.remove(path)
+            try:
+                os.chmod(path, stat.S_IWRITE)
+                os.remove(path)
+            except Exception as e:
+                print(T_cb("err_file_delete_fail").format(path, str(e)))
+                pass
 
 def force_replace(src, dst):
     if os.path.exists(dst):
@@ -62,7 +67,7 @@ def verify_common_key_online(common_key, T_cb, log_cb=lambda x: None):
     
     try:
         key_signature = hashlib.sha1(common_key).hexdigest()
-        if len(common_key) == 16 and key_signature.startswith("6a0b87fc"):
+        if len(common_key) == 16 and key_signature == "6a0b87fc98b306ae3366f0e0a88d0b06a2813313":
             print(T_cb("log_ops_online_auth_ok"))
             log_cb(T_cb("log_debug_key_ok"))
             return True
@@ -118,8 +123,10 @@ def get_yls8_versions(region, fw_version):
 
 def get_default_cert(T_cb, log_cb=lambda x: None):
     global DEFAULT_CERT_DATA, active_cdn_idx
-    if DEFAULT_CERT_DATA: return DEFAULT_CERT_DATA
     
+    with cert_lock:
+        if DEFAULT_CERT_DATA: return DEFAULT_CERT_DATA
+        
     log_cb(T_cb("log_debug_cert"))
     url = f"{BASE_URL}/000500101000400a/cetk"
     for attempt in range(MAX_RETRIES):
@@ -130,11 +137,12 @@ def get_default_cert(T_cb, log_cb=lambda x: None):
             r.raise_for_status()
             data = r.content
             if len(data) >= 0x650:
-                DEFAULT_CERT_DATA = data[0x350 : 0x650]
-                print(f"[CAFE OPS] Successfully cached default certificate. Length: {len(DEFAULT_CERT_DATA)}")
+                with cert_lock:
+                    DEFAULT_CERT_DATA = data[0x350 : 0x650]
+                print(T_cb("log_ops_cert_cached").format(len(DEFAULT_CERT_DATA)))
                 return DEFAULT_CERT_DATA
         except Exception as e:
-            print(f"[CAFE OPS WARN] Failed to get default cert (Attempt {attempt+1}): {e}")
+            print(T_cb("err_ops_cert_fail").format(attempt+1, str(e)))
             with cdn_lock:
                 current = CDN_HOSTS[active_cdn_idx]
                 if current in sticky_url: active_cdn_idx = (active_cdn_idx + 1) % len(CDN_HOSTS)
@@ -158,38 +166,38 @@ def download_file(session, url, dst_path, is_running_cb, T_cb, log_cb=lambda x: 
             headers = {'User-Agent': 'WiiUDownloader/1.0', 'Accept-Encoding': 'identity'}
             
             if total_downloaded > 0: headers['Range'] = f'bytes={total_downloaded}-'
-            r = session.get(sticky_url, headers=headers, stream=True, timeout=(10, 30))
             
-            if r.status_code == 416:
-                total_downloaded = 0
-                headers.pop('Range', None)
-                r = session.get(sticky_url, headers=headers, stream=True, timeout=(10, 30))
+            with session.get(sticky_url, headers=headers, stream=True, timeout=(10, 30)) as r:
+                if r.status_code == 416:
+                    total_downloaded = 0
+                    headers.pop('Range', None)
+                    r.close()
+                    r = session.get(sticky_url, headers=headers, stream=True, timeout=(10, 30))
+                    
+                r.raise_for_status()
+                content_length = int(r.headers.get('Content-Length', 0))
+                log_cb(T_cb("log_debug_headers").format(r.status_code, content_length))
                 
-            r.raise_for_status()
-            content_length = int(r.headers.get('Content-Length', 0))
-            log_cb(T_cb("log_debug_headers").format(r.status_code, content_length))
-            
-            mode = "ab" if r.status_code == 206 else "wb"
-            if mode == "wb": total_downloaded = 0
-            target_size = total_downloaded + content_length if mode == "ab" else content_length
-            
-            if target_size > 0 and total_downloaded == target_size:
-                force_replace(tmp_path, dst_path)
-                return True
+                mode = "ab" if r.status_code == 206 else "wb"
+                if mode == "wb": total_downloaded = 0
+                target_size = total_downloaded + content_length if mode == "ab" else content_length
+                
+                if target_size > 0 and total_downloaded == target_size:
+                    force_replace(tmp_path, dst_path)
+                    return True
 
-            with open(tmp_path, mode) as f:
-                for chunk in r.iter_content(chunk_size=1048576):
-                    if not is_running_cb(): 
-                        f.close()
-                        return False
-                    if chunk:
-                        f.write(chunk)
-                        total_downloaded += len(chunk)
-                        
+                with open(tmp_path, mode) as f:
+                    for chunk in r.iter_content(chunk_size=4194304):
+                        if not is_running_cb(): 
+                            return False
+                        if chunk:
+                            f.write(chunk)
+                            total_downloaded += len(chunk)
+                            
             if target_size > 0:
                 if total_downloaded < target_size: raise RuntimeError(T_cb("err_dl_cut").format(total_downloaded, target_size))
                 if total_downloaded > target_size:
-                    force_remove(tmp_path)
+                    force_remove(tmp_path, T_cb)
                     raise RuntimeError(T_cb("err_dl_over").format(total_downloaded))
             else:
                 if tmd_size is not None and total_downloaded < tmd_size:
@@ -201,7 +209,7 @@ def download_file(session, url, dst_path, is_running_cb, T_cb, log_cb=lambda x: 
         except Exception as e:
             last_error_msg = str(e)
             if isinstance(e, requests.exceptions.HTTPError) and e.response is not None and e.response.status_code == 404:
-                print(f"[CAFE OPS ERROR] HTTP 404: File not found on CDN: {sticky_url}")
+                print(T_cb("err_ops_http_404").format(sticky_url))
                 raise RuntimeError(f"404 Not Found for url: {sticky_url}")
                 
             with cdn_lock:
@@ -368,7 +376,7 @@ def verify_title_integrity(title_id, work_dir, common_key, T_cb, is_running_cb, 
             with open(app_p, 'rb') as f:
                 while processed_size < c.size:
                     if not is_running_cb(): return False
-                    chunk = f.read(1048576)
+                    chunk = f.read(4194304)
                     if not chunk: raise RuntimeError(T_cb("err_app_stop").format(f"{c.id:08X}.app"))
                     if len(chunk) % 16 != 0: chunk += b'\x00' * (16 - (len(chunk) % 16))
                     dec_chunk = decryptor.update(chunk)
@@ -388,7 +396,7 @@ def verify_title_integrity(title_id, work_dir, common_key, T_cb, is_running_cb, 
 
 def extract_file_standard(src_app, dst_path, tkey, content_idx, offset, length, is_running_cb, T_cb):
     base_iv = struct.pack(">H", content_idx) + b'\x00' * 14
-    force_remove(dst_path)
+    force_remove(dst_path, T_cb)
 
     with open(src_app, "rb") as f_in, open(dst_path, "wb") as f_out:
         aligned_offset = offset & ~0xF
@@ -404,7 +412,7 @@ def extract_file_standard(src_app, dst_path, tkey, content_idx, offset, length, 
         
         f_in.seek(aligned_offset)
         remaining = length
-        chunk_size = 1048576
+        chunk_size = 4194304
         first_chunk = True
         
         while remaining > 0:
@@ -440,7 +448,7 @@ def extract_file_hashed(src_app, dst_path, tkey, content_idx, offset, length, is
     roffset = start_chunk_idx * TOTAL_BLOCK
     soffset = offset % DATA_BLOCK
     h_iv = struct.pack(">H", content_idx) + b'\x00' * 14
-    force_remove(dst_path)
+    force_remove(dst_path, T_cb)
 
     with open(src_app, "rb") as f_in, open(dst_path, "wb") as f_out:
         f_in.seek(roffset)
@@ -597,7 +605,7 @@ def process_title(tid, work_dir, target_dir, common_key, T_cb, is_running_cb, lo
                 cipher = Cipher(algorithms.AES(title_key), modes.CBC(iv), backend=default_backend())
                 decryptor = cipher.decryptor()
                 while True:
-                    chunk = f_in.read(1048576)
+                    chunk = f_in.read(4194304)
                     if not chunk: break
                     if len(chunk) % 16 != 0: chunk += b'\x00' * (16 - (len(chunk) % 16))
                     f_out.write(decryptor.update(chunk))

@@ -579,6 +579,11 @@ STRINGS_EN = {
     "log_debug_tmd_info": "[DEBUG] Title ID: {0:016X} | Version: {1} | Contents: {2}",
     "log_debug_content": "[DEBUG]   -> Content: {0:08X} | Index: {1} | Type: 0x{2:04X} | Size: {3} bytes",
     "log_debug_key_check": "[DEBUG] Checking common key...",
+    "err_json_corrupted": "JSON file is corrupted or malformed: {}",
+    "err_file_delete_fail": "[WARN] Failed to delete file {}: {}",
+    "log_ops_cert_cached": "[CDN] Successfully cached default certificate. Length: {}",
+    "err_ops_cert_fail": "[WARN] Failed to get default cert (Attempt {}): {}",
+    "err_ops_http_404": "[CDN ERROR] HTTP 404: File not found on server: {}",
 
     # ==========================================
     # --- 11. LOGS: CTR ENGINE (3DS) ---
