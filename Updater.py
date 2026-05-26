@@ -12,6 +12,9 @@ import signal
 import colorsys
 import shutil
 import time
+import ssl
+
+ssl._create_default_https_context = ssl._create_unverified_context
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
@@ -124,7 +127,7 @@ class DownloadWorkerThread(QThread):
 
     def run(self):
         try:
-            self.progress.emit("Downloading update payload...")
+            self.progress.emit("Downloading...")
             req = urllib.request.Request(self.download_url, headers={'User-Agent': 'TriCoreDownloader-Updater'})
             with urllib.request.urlopen(req, timeout=30) as response:
                 zip_bytes = response.read()
@@ -172,7 +175,7 @@ class DownloadWorkerThread(QThread):
                         
                     extracted_files.add(target_norm)
 
-            self.progress.emit("Cleaning up orphaned core files...")
+            self.progress.emit("Cleaning up old files...")
             
             ALLOWED_FOLDERS = ["TriCoreDownloader", "CAFE", "CTR", "NX", "Languages", "Songs"]
             ALLOWED_ROOT_FILES = ["clean_pycache.bat", "run_TriCoreDownloader.py", "start.bat", "Updater.py", "clean_save.bat", "LICENSE", "README.md"]
@@ -294,7 +297,7 @@ class UpdaterWindow(QMainWindow):
         self.beta_checkbox.stateChanged.connect(self.toggle_beta_mode)
         card_layout.addWidget(self.beta_checkbox)
         
-        self.status_lbl = QLabel("Checking available system versions...", card_frame)
+        self.status_lbl = QLabel("Checking available TriCoreDownloader versions...", card_frame)
         card_layout.addWidget(self.status_lbl)
         
         combo_layout = QHBoxLayout()
@@ -498,7 +501,7 @@ class UpdaterWindow(QMainWindow):
         for text, data in self.cached_releases:
             self.version_combo.addItem(text, data)
             
-        if state == Qt.CheckState.Checked.value:
+        if state == 2:
             self.btn_execute.setEnabled(False)
             QTimer.singleShot(100, self.fetch_beta_source)
         else:
@@ -549,11 +552,11 @@ class UpdaterWindow(QMainWindow):
             self.btn_execute.setEnabled(True)
             
             if self.force_reinstall_mode:
-                self.status_lbl.setText("Automated structural reinstallation sequence triggered...")
+                self.status_lbl.setText("Automatic reinstallation triggered...")
                 QTimer.singleShot(300, self.start_installation)
             elif self.force_prerelease_mode and prerelease_idx != -1:
                 self.version_combo.setCurrentIndex(prerelease_idx)
-                self.status_lbl.setText("Automated structural beta deployment sequence triggered...")
+                self.status_lbl.setText("Automatic reinstallation (beta) triggered...")
                 QTimer.singleShot(300, self.start_installation)
             elif self.force_view_all_mode:
                 self.version_combo.setCurrentIndex(0)
@@ -564,9 +567,9 @@ class UpdaterWindow(QMainWindow):
                     self.version_combo.setCurrentIndex(0)
                     
             if self.beta_checkbox.isChecked():
-                self.toggle_beta_mode(Qt.CheckState.Checked.value)
+                self.toggle_beta_mode(2)
         else:
-            self.status_lbl.setText("No public release distributions found.")
+            self.status_lbl.setText("No public release distributions found?")
             
         if hasattr(self, 'btn_refresh'):
             self.btn_refresh.setEnabled(True)
@@ -598,7 +601,7 @@ class UpdaterWindow(QMainWindow):
             self.set_warning("WARNING: These versions are actively under development. Reliability might be lower. Install only if you accept the risks and dangers! 👍")
             self.btn_execute.setEnabled(True)
         except Exception as e:
-            self.set_warning(f"Failed to fetch main branch metadata matrix: {e}")
+            self.set_warning(f"Failed to fetch main branch metadata: {e}")
             self.btn_execute.setEnabled(False)
             
         if hasattr(self, 'btn_refresh'):
@@ -647,7 +650,7 @@ class UpdaterWindow(QMainWindow):
             err_box.setWindowIcon(self.get_app_icon())
             err_box.setIcon(QMessageBox.Icon.Critical)
             err_box.setWindowTitle("Asset Missing")
-            err_box.setText("No installable binary distribution tree could be resolved for this variant.")
+            err_box.setText("404: Please report this problem in the issues.")
             err_box.exec()
             return
             
@@ -668,8 +671,8 @@ class UpdaterWindow(QMainWindow):
             success_box = QMessageBox(self)
             success_box.setWindowIcon(self.get_app_icon())
             success_box.setIcon(QMessageBox.Icon.Information)
-            success_box.setWindowTitle("Success")
-            success_box.setText("The application structural assets have been updated successfully.\n\nPress OK to reload TriCoreDownloader.")
+            success_box.setWindowTitle("Success:")
+            success_box.setText("TriCoreDownloader have been updated successfully.\n\nPress OK to reload TriCoreDownloader.")
             success_box.exec()
             
             main_script = os.path.join(self.install_dir, "run_TriCoreDownloader.py")
@@ -683,7 +686,7 @@ class UpdaterWindow(QMainWindow):
             fail_box = QMessageBox(self)
             fail_box.setWindowIcon(self.get_app_icon())
             fail_box.setIcon(QMessageBox.Icon.Critical)
-            fail_box.setWindowTitle("Installation Failed")
+            fail_box.setWindowTitle("Installation Failed...")
             fail_box.setText(f"Critical execution error:\n{message}")
             fail_box.exec()
             
@@ -702,7 +705,7 @@ class UpdaterWindow(QMainWindow):
         box.setIcon(QMessageBox.Icon.Question)
         
         btn_return = box.addButton("Return to TriCoreDownloader", QMessageBox.ButtonRole.YesRole)
-        btn_exit = box.addButton("Exit completely", QMessageBox.ButtonRole.DestructiveRole)
+        btn_exit = box.addButton("Exit", QMessageBox.ButtonRole.DestructiveRole)
         box.addButton("Stay here", QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(btn_return)
         box.exec()
