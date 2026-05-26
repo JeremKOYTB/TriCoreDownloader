@@ -672,7 +672,7 @@ class UpdaterWindow(QMainWindow):
             success_box.setWindowIcon(self.get_app_icon())
             success_box.setIcon(QMessageBox.Icon.Information)
             success_box.setWindowTitle("Success:")
-            success_box.setText("TriCoreDownloader have been updated successfully.\n\nPress OK to reload TriCoreDownloader.")
+            success_box.setText("TriCoreDownloader has been updated successfully.\n\nPress OK to reload TriCoreDownloader.")
             success_box.exec()
             
             main_script = os.path.join(self.install_dir, "run_TriCoreDownloader.py")
