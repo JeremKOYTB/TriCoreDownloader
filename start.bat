@@ -56,7 +56,7 @@ if "!LANG_CODE!"=="FR" (
     set "MSG_INSTALL_DESC=Python 3.12+ est requis pour exécuter ce programme."
     set "MSG_PROMPT_INSTALL=Voulez-vous l'installer maintenant ? [y/n]: "
     set "MSG_FIND_PY=[2/3] Recherche de la dernière version de Python 3..."
-    set "MSG_GATHERING=[INFO] Collecte des données depuis python.org..."
+    set "MSG_GATHERING=[INFO] Collecte des données depuis https://www.python.org/downloads/windows/..."
     set "MSG_PARSING=[INFO] Analyse de la dernière version..."
     set "MSG_PY_FOUND=[INFO] Version trouvée - Téléchargement en cours :"
     set "MSG_PY_NO_WEB=[ATTENTION] Impossible de trouver la dernière version via le web. Utilisation de la version par défaut :"
@@ -87,7 +87,7 @@ if "!LANG_CODE!"=="FR" (
     set "MSG_INSTALL_DESC=Python 3.12+ is required to run this program."
     set "MSG_PROMPT_INSTALL=Install now? [y/n]: "
     set "MSG_FIND_PY=[2/3] Searching for the latest Python 3 version..."
-    set "MSG_GATHERING=[INFO] Gathering info from python.org..."
+    set "MSG_GATHERING=[INFO] Gathering info from https://www.python.org/downloads/windows/..."
     set "MSG_PARSING=[INFO] Parsing for latest version..."
     set "MSG_PY_FOUND=[INFO] Version found - Downloading :"
     set "MSG_PY_NO_WEB=[WARNING] Could not find latest version via web. Falling back to default :"
@@ -231,8 +231,18 @@ echo ============================================================
 echo.
 echo !MSG_INSTALL_DESC!
 echo.
+
+:prompt_loop
+set "menu="
 set /p "menu=!MSG_PROMPT_INSTALL!"
-if /i "!menu!" NEQ "y" exit /b 0
+if /i "!menu!"=="y" goto installpy
+if /i "!menu!"=="yes" goto installpy
+if /i "!menu!"=="o" goto installpy
+if /i "!menu!"=="oui" goto installpy
+if /i "!menu!"=="n" exit /b 0
+if /i "!menu!"=="no" exit /b 0
+if /i "!menu!"=="non" exit /b 0
+goto prompt_loop
 
 :installpy
 set /a tried+=1
@@ -241,21 +251,16 @@ echo !MSG_FIND_PY!
 echo.
 echo !MSG_GATHERING!
 
-set "py_html=%TEMP%\pyurl.txt"
-if exist "!curlpath!" (
-    "!curlpath!" -sL -o "!py_html!" "https://www.python.org/downloads/windows/"
-) else (
-    "!pspath!" -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12;(New-Object System.Net.WebClient).DownloadFile('https://www.python.org/downloads/windows/','!py_html!')"
-)
+"!pspath!" -NoProfile -Command "[System.Net.ServicePointManager]::ServerCertificateValidationCallback={$true}; [Net.ServicePointManager]::SecurityProtocol=@('Tls12','Tls13'); (New-Object System.Net.WebClient).DownloadFile('https://www.python.org/downloads/windows/','%TEMP%\pyurl.txt')"
+"!pspath!" -NoProfile -Command "$infile='%TEMP%\pyurl.txt';$outfile='%TEMP%\pyurl.temp';try{$input=New-Object System.IO.FileStream $infile,([IO.FileMode]::Open),([IO.FileAccess]::Read),([IO.FileShare]::Read);$output=New-Object System.IO.FileStream $outfile,([IO.FileMode]::Create),([IO.FileAccess]::Write),([IO.FileShare]::None);$gzipStream=New-Object System.IO.Compression.GzipStream $input,([IO.Compression.CompressionMode]::Decompress);$buffer=New-Object byte[](1024);while($true){$read=$gzipstream.Read($buffer,0,1024);if($read -le 0){break};$output.Write($buffer,0,$read)};$gzipStream.Close();$output.Close();$input.Close();Move-Item -Path $outfile -Destination $infile -Force}catch{}"
 
 echo !MSG_PARSING!
 set "latest_py="
-if exist "!py_html!" (
-    for /f "tokens=9 delims=< " %%x in ('findstr /i /c:"Latest Python 3 Release" "!py_html!" 2^>nul') do (
-        set "latest_py=%%x"
-    )
-    del /f /q "!py_html!" >nul 2>&1
+pushd "%TEMP%"
+for /f "tokens=9 delims=< " %%x in ('findstr /i /c:"Latest Python 3 Release" pyurl.txt 2^>nul') do (
+    set "latest_py=%%x"
 )
+popd
 
 if not "!latest_py!"=="" (
     set "py_ver=!latest_py!"
@@ -263,15 +268,16 @@ if not "!latest_py!"=="" (
 ) else (
     echo !MSG_PY_NO_WEB! !py_ver!
 )
+if exist "%TEMP%\pyurl.txt" del /f /q "%TEMP%\pyurl.txt" >nul 2>&1
 
 echo.
-set "url=https://www.ftp.python.org/ftp/python/!py_ver!/python-!py_ver!-!arch!.exe"
+set "url=https://www.python.org/ftp/python/!py_ver!/python-!py_ver!-!arch!.exe"
 set "py_exe=%TEMP%\pyinstall.exe"
 
 if exist "!curlpath!" ( 
-    "!curlpath!" -L -o "!py_exe!" "!url!" 
+    "!curlpath!" -skL -o "!py_exe!" "!url!" 
 ) else ( 
-    "!pspath!" -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; (New-Object System.Net.WebClient).DownloadFile('!url!','!py_exe!')" 
+    "!pspath!" -NoProfile -Command "[System.Net.ServicePointManager]::ServerCertificateValidationCallback={$true}; [Net.ServicePointManager]::SecurityProtocol=@('Tls12','Tls13'); (New-Object System.Net.WebClient).DownloadFile('!url!','!py_exe!')" 
 )
 
 if not exist "!py_exe!" ( 

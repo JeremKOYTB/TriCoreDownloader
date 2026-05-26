@@ -7,6 +7,9 @@ import traceback
 import logging
 import locale
 from datetime import datetime
+import ssl
+
+ssl._create_default_https_context = ssl._create_unverified_context
 
 # =====================================================================
 # SILENT LOGGING BOOTSTRAP
