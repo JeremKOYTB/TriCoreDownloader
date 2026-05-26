@@ -355,7 +355,6 @@ class UpdaterWindow(QMainWindow):
         self.pulse_anim.setLoopCount(-1)
         self.pulse_anim.setDuration(2000)
         
-        # --- MODIFICATION ICI ---
         self.btn_cancel = QPushButton("Cancel", self)
         self.btn_cancel.clicked.connect(self.handle_cancel)
         
@@ -363,7 +362,6 @@ class UpdaterWindow(QMainWindow):
         btn_layout.addWidget(self.lbl_warning_symbol)
         btn_layout.addStretch(1)
         btn_layout.addWidget(self.btn_cancel)
-        # ------------------------
         
         main_layout.addLayout(btn_layout)
         
