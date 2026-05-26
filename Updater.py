@@ -261,72 +261,10 @@ class UpdaterWindow(QMainWindow):
         return QIcon()
 
     def _convert_markdown_to_html(self, text):
-        if not text: return ""
-        html_lines, in_blockquote, in_list, in_code = [], False, False, False
-        
-        for line in text.split("\n"):
-            line_str = line.strip()
-            
-            if line_str.startswith("```"):
-                if in_code:
-                    html_lines.append("</pre></div>")
-                    in_code = False
-                else:
-                    html_lines.append("<div style='background-color: #2D2D36; padding: 8px; border-radius: 6px; margin: 6px 0;'><pre style='margin: 0; color: #E8E8E8; font-family: Consolas, monospace; white-space: pre-wrap;'>")
-                    in_code = True
-                continue
-                
-            if in_code:
-                html_lines.append(f"<div>{line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')}</div>")
-                continue
-                
-            if not line_str:
-                if in_blockquote: html_lines.append("</blockquote>"); in_blockquote = False
-                if in_list: html_lines.append("</ul>"); in_list = False
-                html_lines.append("<br>")
-                continue
-                
-            if line_str.startswith(">"):
-                line_str = line_str.lstrip(">").strip()
-                if not in_blockquote:
-                    html_lines.append("<blockquote style='color: #A0A0AB; font-style: italic; margin: 4px 0; padding-left: 10px; border-left: 3px solid #4A4A55;'>")
-                    in_blockquote = True
-            elif in_blockquote:
-                html_lines.append("</blockquote>"); in_blockquote = False
-                
-            is_list = False
-            if line_str.startswith("- ") or line_str.startswith("* "):
-                is_list = True
-                line_str = line_str[2:].strip()
-                if not in_list:
-                    html_lines.append("<ul style='margin-top: 4px; margin-bottom: 4px; padding-left: 20px;'>")
-                    in_list = True
-            elif in_list:
-                html_lines.append("</ul>"); in_list = False
-
-            line_str = re.sub(r'\*\*(.*?)\*\*', r'<b style="color: #FFFFFF;">\1</b>', line_str)
-            line_str = re.sub(r'__(.*?)__', r'<b style="color: #FFFFFF;">\1</b>', line_str)
-            line_str = re.sub(r'\*(.*?)\*', r'<i style="color: #E8E8E8;">\1</i>', line_str)
-            line_str = re.sub(r'_(.*?)_', r'<i style="color: #E8E8E8;">\1</i>', line_str)
-            line_str = re.sub(r'~~(.*?)~~', r'<s style="color: #8A8A95;">\1</s>', line_str)
-            line_str = re.sub(r'`(.*?)`', r'<code style="background-color: #2D2D36; padding: 2px 4px; border-radius: 4px; color: #C4A1FF;">\1</code>', line_str)
-            line_str = re.sub(r'\[(.*?)\]\((.*?)\)', r'<a href="\2" style="color: #00A2E8; text-decoration: none;">\1</a>', line_str)
-            
-            if line_str.startswith("#"):
-                match = re.match(r'^(#+)\s*(.*)', line_str)
-                if match:
-                    size = max(18 - (len(match.group(1)) * 2), 11)
-                    html_lines.append(f"<div style='color: #FFFFFF; font-size: {size}pt; font-weight: bold; margin-top: 10px; margin-bottom: 6px;'>{match.group(2)}</div>")
-                    continue
-                    
-            if is_list: html_lines.append(f"<li>{line_str}</li>")
-            elif line_str: html_lines.append(f"<div>{line_str}</div>")
-
-        if in_blockquote: html_lines.append("</blockquote>")
-        if in_list: html_lines.append("</ul>")
-        if in_code: html_lines.append("</pre></div>")
-            
-        return "".join(html_lines)
+        if not text:
+            return ""
+        text_normalized = text.replace("\r\n", "\n")
+        return re.sub(r'(?<!\n)\n(?!\n)', '\n\n', text_normalized)
 
     def init_ui(self):
         central_widget = QWidget(self)
@@ -344,7 +282,7 @@ class UpdaterWindow(QMainWindow):
         card_layout.setContentsMargins(15, 15, 15, 15)
         card_layout.setSpacing(12)
         
-        title_lbl = QLabel("TriCoreDownloader Updater 1.0.0", card_frame)
+        title_lbl = QLabel("TriCoreDownloader Updater 1.0.1", card_frame)
         title_lbl.setObjectName("CardTitle")
         card_layout.addWidget(title_lbl)
         
@@ -383,7 +321,7 @@ class UpdaterWindow(QMainWindow):
         self.browser = QTextEdit(card_frame)
         self.browser.setReadOnly(True)
         self.browser.setMinimumHeight(150)
-        self.browser.setWordWrapMode(QTextOption.WrapMode.WrapAnywhere)
+        self.browser.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
         card_layout.addWidget(self.browser)
         
         self.version_combo.currentIndexChanged.connect(self.on_version_changed_index)
@@ -417,13 +355,13 @@ class UpdaterWindow(QMainWindow):
         self.pulse_anim.setLoopCount(-1)
         self.pulse_anim.setDuration(2000)
         
-        self.btn_cancel = QPushButton("Cancel", self)
-        self.btn_cancel.clicked.connect(self.handle_cancel)
+        btn_cancel = QPushButton("Cancel", self)
+        btn_cancel.clicked.connect(self.handle_cancel)
         
         btn_layout.addWidget(self.btn_execute)
         btn_layout.addWidget(self.lbl_warning_symbol)
         btn_layout.addStretch(1)
-        btn_layout.addWidget(self.btn_cancel)
+        btn_layout.addWidget(btn_cancel)
         main_layout.addLayout(btn_layout)
         
         self.setFixedWidth(500)
@@ -566,6 +504,9 @@ class UpdaterWindow(QMainWindow):
             self.btn_execute.setEnabled(self.version_combo.count() > 0)
         self.adjustSize()
 
+    def merge_dicts(self, dict1, dict2):
+        return {**dict1, **dict2}
+
     def fetch_all_releases(self):
         self.fetch_thread = ReleasesFetchThread()
         self.fetch_thread.finished.connect(self.process_releases)
@@ -678,7 +619,7 @@ class UpdaterWindow(QMainWindow):
             self.commit_thread.start()
         else:
             changelog_text = current_data.get("body", "No changelog provided.") if isinstance(current_data, dict) else ""
-            self.browser.setHtml(self._convert_markdown_to_html(changelog_text))
+            self.browser.setMarkdown(self._convert_markdown_to_html(changelog_text))
 
     def on_main_branch_commit_loaded(self, commit_text):
         self.browser.setHtml(commit_text)
