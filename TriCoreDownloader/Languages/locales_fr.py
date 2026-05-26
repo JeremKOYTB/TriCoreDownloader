@@ -648,4 +648,5 @@ STRINGS_FR = {
     "log_success_final": "\n[SUCCÈS] Opération terminée ! Fichiers dans :\n{0}",
     "log_stats_full": "[STATISTIQUES] Temps : {0:.2f}s | Réussis : {1}/{2}",
     "log_pack_success": "La structure à été validé pour : {0} !",
+    "err_build_failed": "La création d'un CIA a échoué. Si le problème persiste, veuillez le signaler dans les issues.",
 }

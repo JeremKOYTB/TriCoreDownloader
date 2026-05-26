@@ -649,4 +649,5 @@ STRINGS_EN = {
     "log_success_final": "\n[SUCCESS] Operation completed! Files in:\n{0}",
     "log_stats_full": "[STATISTICS] Time: {0:.2f}s | Success: {1}/{2}",
     "log_pack_success": "Structure validated for: {0}!",
+    "err_build_failed": "CIA build failed. If the problem persists, please report this as an issue.",
 }

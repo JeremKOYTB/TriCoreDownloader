@@ -293,7 +293,9 @@ class CtrDownloaderWorker(QThread):
                     
                     try:
                         is_valid = future.result()
-                        if not is_valid: raise RuntimeError(self.T("err_hash_mismatch").format(t_id))
+                        if not is_valid: 
+                            if self._is_stopped: return self._handle_stop()
+                            raise RuntimeError(self.T("err_hash_mismatch").format(t_id))
                         
                         percent = int((completed_verifications / total_verify) * 100)
                         self.progress_signal.emit(global_current_step, global_total_steps)
@@ -302,6 +304,7 @@ class CtrDownloaderWorker(QThread):
                         if verbose_logs: self.log_replace_signal.emit(self.T("log_verify_progress").format(percent, t_id))
                         else: self.log_replace_signal.emit(self._text_bar(self.T("step_verify"), percent))
                     except Exception as e:
+                        if self._is_stopped: return self._handle_stop()
                         raise RuntimeError(self.T("err_verify_fail").format(e))
 
             self._active_executor = None
@@ -327,9 +330,12 @@ class CtrDownloaderWorker(QThread):
                 
                 try:
                     success = pack_cia(t_id, t_dir, self._current_out_dir, self.T, is_stopped_cb=self._is_stopped_cb, log_cb=log_callback, **pack_kwargs_enc)
-                    if not success: raise RuntimeError(self.T("err_build_failed").format(t_id))
+                    if not success: 
+                        if self._is_stopped: return self._handle_stop()
+                        raise RuntimeError(self.T("err_build_failed").format(t_id))
                     built_titles.append((t_id, t_dir))
                 except Exception as e:
+                    if self._is_stopped: return self._handle_stop()
                     raise RuntimeError(self.T("err_assemble_fail").format(e))
 
             if will_decrypt and built_titles:
@@ -351,8 +357,11 @@ class CtrDownloaderWorker(QThread):
                     
                     try:
                         success = pack_cia(t_id, t_dir, self._current_out_dir, self.T, is_stopped_cb=self._is_stopped_cb, log_cb=log_callback, **pack_kwargs_dec)
-                        if not success: raise RuntimeError(self.T("err_decrypt_engine_failed").format(t_id))
+                        if not success: 
+                            if self._is_stopped: return self._handle_stop()
+                            raise RuntimeError(self.T("err_decrypt_engine_failed").format(t_id))
                     except Exception as e:
+                        if self._is_stopped: return self._handle_stop()
                         raise RuntimeError(self.T("err_decrypt_fail").format(e))
 
             self._robust_rmtree(self._current_tmp_dir)
@@ -372,6 +381,9 @@ class CtrDownloaderWorker(QThread):
             self.finished_signal.emit(True, self.T("msg_success_done"))
 
         except Exception as e:
+            if self._is_stopped:
+                return self._handle_stop()
+                
             if verbose_logs:
                 self.log_signal.emit("\n==================================================")
                 self.log_signal.emit(self.T("log_tech_trace"))
