@@ -233,7 +233,7 @@ servs (or local database)  your keys (boot9, etc.)     (Using standard engine or
 
 ## Contact & Platforms
 
-To report bugs, follow project updates, or ask questions, you can reach out through these channels:
+To report bugs, follow project updates, or ask questions:
 
 * **Discord:** `jeremko`
 * **Twitter (X):** [@JeremKOYTB](https://x.com/JeremKOYTB)
