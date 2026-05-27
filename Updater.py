@@ -318,7 +318,7 @@ class UpdaterWindow(QMainWindow):
         card_layout.setContentsMargins(15, 15, 15, 15)
         card_layout.setSpacing(12)
         
-        title_lbl = QLabel("TriCoreDownloader Updater 1.0.1", card_frame)
+        title_lbl = QLabel("TriCoreDownloader Updater 1.1.0", card_frame)
         title_lbl.setObjectName("CardTitle")
         card_layout.addWidget(title_lbl)
         
