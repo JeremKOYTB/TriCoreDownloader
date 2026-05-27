@@ -128,72 +128,72 @@ class DownloadWorkerThread(QThread):
     progress = pyqtSignal(str)
     completed = pyqtSignal(bool, str)
 
-    def __init__(self, download_url, install_dir):
+    def __init__(self, download_url, install_dir, target_version):
         super().__init__()
         self.download_url = download_url
         self.install_dir = os.path.abspath(install_dir)
+        self.target_version = target_version
+        self.is_7z = download_url.lower().endswith(".7z")
+        self.skip_updater = self.target_version in ["0.9.0", "0.9.0.1", "0.9.0.2", "0.9.0.3", "0.9.0.4", "0.9.0.5"]
 
     def run(self):
+        temp_archive_path = os.path.join(self.install_dir, "TCD_Update_Temp." + ("7z" if self.is_7z else "zip"))
+        temp_extract_dir = os.path.join(self.install_dir, "TCD_Extract_Temp")
+        
         try:
-            self.progress.emit("Downloading...")
+            if self.is_7z:
+                self.progress.emit("Loading 7z extraction modules...")
+                if importlib.util.find_spec("py7zr") is None:
+                    try:
+                        subprocess.check_call([sys.executable, "-m", "pip", "install", "py7zr"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    except subprocess.CalledProcessError:
+                        raise Exception("Failed to install py7zr required for 7z extraction.")
+            
+            self.progress.emit("Downloading archive...")
             req = urllib.request.Request(self.download_url, headers={'User-Agent': 'TriCoreDownloader-Updater'})
-            with urllib.request.urlopen(req, timeout=30) as response:
-                zip_bytes = response.read()
+            with urllib.request.urlopen(req, timeout=30) as response, open(temp_archive_path, 'wb') as out_file:
+                shutil.copyfileobj(response, out_file)
 
-            self.progress.emit("Extracting files and replacing old data...")
-            extracted_files = set()
+            self.progress.emit("Extracting files...")
+            os.makedirs(temp_extract_dir, exist_ok=True)
             
-            install_dir_norm = os.path.normcase(self.install_dir)
-            
-            with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
-                namelist = z.namelist()
-                common_prefix = None
-                
-                for name in namelist:
-                    if not name.endswith('/'):
-                        parts = name.split('/')
-                        if len(parts) > 1:
-                            if common_prefix is None:
-                                common_prefix = parts[0] + '/'
-                            elif not name.startswith(common_prefix):
-                                common_prefix = ""
-                                break
-                        else:
-                            common_prefix = ""
-                            break
-                            
-                for member in z.infolist():
-                    filename = member.filename
-                    
-                    if common_prefix and filename.startswith(common_prefix):
-                        filename = filename[len(common_prefix):]
-                        
-                    if not filename or filename.endswith('/'):
-                        continue 
+            if self.is_7z:
+                import py7zr
+                with py7zr.SevenZipFile(temp_archive_path, mode='r') as z:
+                    z.extractall(path=temp_extract_dir)
+            else:
+                with zipfile.ZipFile(temp_archive_path, 'r') as z:
+                    z.extractall(temp_extract_dir)
 
-                    target_path = os.path.abspath(os.path.join(self.install_dir, filename))
-                    target_norm = os.path.normcase(target_path)
-                    
-                    if not target_norm.startswith(install_dir_norm):
-                        continue
+            self.progress.emit("Analyzing architecture...")
+            base_target = temp_extract_dir
+            contents = os.listdir(temp_extract_dir)
+            if len(contents) == 1:
+                possible_dir = os.path.join(temp_extract_dir, contents[0])
+                if os.path.isdir(possible_dir):
+                    base_target = possible_dir
 
-                    os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                    with open(target_path, "wb") as f_out:
-                        f_out.write(z.read(member))
-                        
-                    extracted_files.add(target_norm)
+            main_script_target = os.path.join(base_target, "run_TriCoreDownloader.py")
+            if not os.path.exists(main_script_target):
+                raise Exception("Security: The vital file 'run_TriCoreDownloader.py' is missing from the downloaded archive. The update is cancelled to protect your current installation.")
 
             self.progress.emit("Cleaning up old files...")
-            
+            extracted_files = set()
+            for root, _, files in os.walk(base_target):
+                for f in files:
+                    if self.skip_updater and f == "Updater.py":
+                        continue
+                    rel_path = os.path.relpath(os.path.join(root, f), base_target)
+                    extracted_files.add(os.path.normcase(os.path.abspath(os.path.join(self.install_dir, rel_path))))
+
             ALLOWED_FOLDERS = ["TriCoreDownloader", "CAFE", "CTR", "NX", "Languages", "Songs"]
             ALLOWED_ROOT_FILES = ["clean_pycache.bat", "run_TriCoreDownloader.py", "start.bat", "Updater.py", "clean_save.bat", "LICENSE", "README.md"]
-            
+
             for folder in ALLOWED_FOLDERS:
                 folder_path = os.path.abspath(os.path.join(self.install_dir, folder))
                 if not os.path.exists(folder_path):
                     continue
-                    
-                for dirpath, dirnames, filenames in os.walk(folder_path, topdown=False):
+                for dirpath, _, filenames in os.walk(folder_path, topdown=False):
                     for f in filenames:
                         file_path = os.path.abspath(os.path.join(dirpath, f))
                         file_norm = os.path.normcase(file_path)
@@ -202,7 +202,6 @@ class DownloadWorkerThread(QThread):
                                 os.remove(file_path)
                             except Exception:
                                 pass
-                    
                     try:
                         if not os.listdir(dirpath):
                             os.rmdir(dirpath)
@@ -210,6 +209,8 @@ class DownloadWorkerThread(QThread):
                         pass
                         
             for root_file in ALLOWED_ROOT_FILES:
+                if self.skip_updater and root_file == "Updater.py":
+                    continue
                 file_path = os.path.abspath(os.path.join(self.install_dir, root_file))
                 file_norm = os.path.normcase(file_path)
                 if os.path.exists(file_path) and file_norm not in extracted_files:
@@ -218,9 +219,28 @@ class DownloadWorkerThread(QThread):
                     except Exception:
                         pass
 
+            self.progress.emit("Installing new files...")
+            for root, _, files in os.walk(base_target):
+                for f in files:
+                    if self.skip_updater and f == "Updater.py":
+                        continue
+                    src_file = os.path.join(root, f)
+                    rel_path = os.path.relpath(src_file, base_target)
+                    dst_file = os.path.join(self.install_dir, rel_path)
+                    os.makedirs(os.path.dirname(dst_file), exist_ok=True)
+                    shutil.copy2(src_file, dst_file)
+
             self.completed.emit(True, "Update installed successfully.")
         except Exception as e:
             self.completed.emit(False, str(e))
+        finally:
+            if os.path.exists(temp_extract_dir):
+                shutil.rmtree(temp_extract_dir, ignore_errors=True)
+            if os.path.exists(temp_archive_path):
+                try:
+                    os.remove(temp_archive_path)
+                except Exception:
+                    pass
 
 class UpdaterWindow(QMainWindow):
     def __init__(self, current_version):
@@ -253,6 +273,11 @@ class UpdaterWindow(QMainWindow):
         self.rainbow_mode = self.app_cfg.get("rainbow_mode", False)
         self.rainbow_speed = self.app_cfg.get("rainbow_speed", 2)
         self.current_hue = 0.0
+        
+        self.spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        self.spinner_idx = 0
+        self.spinner_timer = QTimer(self)
+        self.spinner_timer.timeout.connect(self.update_spinner_ui)
         
         self.init_ui()
         self.apply_style()
@@ -305,8 +330,19 @@ class UpdaterWindow(QMainWindow):
         self.beta_checkbox.stateChanged.connect(self.toggle_beta_mode)
         card_layout.addWidget(self.beta_checkbox)
         
+        status_layout = QHBoxLayout()
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        
         self.status_lbl = QLabel("Checking available TriCoreDownloader versions...", card_frame)
-        card_layout.addWidget(self.status_lbl)
+        status_layout.addWidget(self.status_lbl)
+        
+        self.status_icon_lbl = QLabel("", card_frame)
+        self.status_icon_lbl.setFixedWidth(20)
+        status_layout.addWidget(self.status_icon_lbl)
+        
+        status_layout.addStretch()
+        
+        card_layout.addLayout(status_layout)
         
         combo_layout = QHBoxLayout()
         combo_layout.setContentsMargins(0, 0, 0, 0)
@@ -393,6 +429,10 @@ class UpdaterWindow(QMainWindow):
         r, g, b = colorsys.hsv_to_rgb(self.current_hue / 360.0, sat_f, val_f)
         self.accent_color = f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}"
         self.apply_style()
+
+    def update_spinner_ui(self):
+        self.status_icon_lbl.setText(self.spinner_chars[self.spinner_idx])
+        self.spinner_idx = (self.spinner_idx + 1) % len(self.spinner_chars)
 
     def update_scrollbar_stylesheet(self):
         tmp_dir = QDir.tempPath() + "/TriCore_SVGs"
@@ -495,6 +535,7 @@ class UpdaterWindow(QMainWindow):
     def refresh_data(self):
         if hasattr(self, 'btn_refresh'):
             self.btn_refresh.setEnabled(False)
+        self.status_icon_lbl.setText("")
         self.status_lbl.setText("Refreshing data from GitHub...")
         self.version_combo.clear()
         self.version_combo.setEnabled(False)
@@ -526,6 +567,7 @@ class UpdaterWindow(QMainWindow):
 
     def process_releases(self, data, error_str):
         if error_str:
+            self.status_icon_lbl.setText("❌")
             self.status_lbl.setText(f"API Connection Error: {error_str}")
             if hasattr(self, 'btn_refresh'):
                 self.btn_refresh.setEnabled(True)
@@ -535,6 +577,7 @@ class UpdaterWindow(QMainWindow):
         self.cached_releases = []
         self.version_combo.clear()
         self.browser.clear()
+        self.status_icon_lbl.setText("")
         
         first_stable_idx = -1
         prerelease_idx = -1
@@ -639,7 +682,11 @@ class UpdaterWindow(QMainWindow):
     def check_version_warnings(self, index):
         if index < 0: return
         current_text = self.version_combo.currentText()
-        if "main branch" in current_text:
+        base_version = current_text.split(" ")[0]
+        
+        if base_version == "0.9.0":
+            self.set_warning("⚠️ WARNING: The structure of the 0.9.0 archive is incompatible with this updater. Installing it may corrupt the folder. Proceed with extreme caution.")
+        elif "main branch" in current_text:
             self.set_warning("WARNING: These versions are actively under development. Reliability might be lower. Install only if you accept the risks and dangers! 👍")
         else:
             current_data = self.version_combo.currentData()
@@ -652,13 +699,30 @@ class UpdaterWindow(QMainWindow):
         current_data = self.version_combo.currentData()
         if not current_data: return
         
-        download_url = current_data.get("zipball_url")
+        current_text = self.version_combo.currentText()
+        base_version = current_text.split(" ")[0]
+        
+        download_url = None
+        is_main_branch = current_data.get("is_main_branch_node", False)
+        
+        if is_main_branch:
+            download_url = current_data.get("zipball_url")
+        else:
+            assets = current_data.get("assets", [])
+            for asset in assets:
+                name = asset.get("name", "").lower()
+                if name.endswith(".zip") or name.endswith(".7z"):
+                    download_url = asset.get("browser_download_url")
+                    break
+                    
         if not download_url:
+            self.status_icon_lbl.setText("❌")
+            self.status_lbl.setText("Select a release:")
             err_box = QMessageBox(self)
             err_box.setWindowIcon(self.get_app_icon())
             err_box.setIcon(QMessageBox.Icon.Critical)
             err_box.setWindowTitle("Asset Missing")
-            err_box.setText("404: Please report this problem in the issues.")
+            err_box.setText("Security: No valid compiled asset (.zip or .7z) was found in this release. Source code download is explicitly forbidden for official releases.")
             err_box.exec()
             return
             
@@ -668,14 +732,19 @@ class UpdaterWindow(QMainWindow):
         self.beta_checkbox.setEnabled(False)
         if hasattr(self, 'btn_refresh'):
             self.btn_refresh.setEnabled(False)
+            
+        self.spinner_timer.start(100)
         
-        self.worker = DownloadWorkerThread(download_url, self.install_dir)
+        self.worker = DownloadWorkerThread(download_url, self.install_dir, base_version)
         self.worker.progress.connect(self.status_lbl.setText)
         self.worker.completed.connect(self.installation_finished)
         self.worker.start()
 
     def installation_finished(self, success, message):
+        self.spinner_timer.stop()
         if success:
+            self.status_icon_lbl.setText("✅")
+            self.status_lbl.setText("Complete.")
             success_box = QMessageBox(self)
             success_box.setWindowIcon(self.get_app_icon())
             success_box.setIcon(QMessageBox.Icon.Information)
@@ -691,6 +760,8 @@ class UpdaterWindow(QMainWindow):
                 subprocess.Popen([sys.executable, main_script], **kwargs)
             sys.exit(0)
         else:
+            self.status_icon_lbl.setText("❌")
+            self.status_lbl.setText("Select a release:")
             fail_box = QMessageBox(self)
             fail_box.setWindowIcon(self.get_app_icon())
             fail_box.setIcon(QMessageBox.Icon.Critical)
@@ -728,6 +799,9 @@ class UpdaterWindow(QMainWindow):
             sys.exit(0)
         elif box.clickedButton() == btn_exit:
             sys.exit(0)
+        else:
+            self.status_icon_lbl.setText("❌")
+            self.status_lbl.setText("Select a release:")
 
 class MainBranchCommitFetchThread(QThread):
     finished = pyqtSignal(str)
