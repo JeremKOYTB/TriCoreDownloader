@@ -18,8 +18,6 @@ ssl._create_default_https_context = ssl._create_unverified_context
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
-# AJOUT : Injection du chemin d'installation original dans sys.path AVANT les imports locaux
-# Cela permet au processus détaché dans AppData de trouver le module TriCoreDownloader.config.
 if "--install-dir" in sys.argv:
     try:
         idx = sys.argv.index("--install-dir")
@@ -794,8 +792,6 @@ if __name__ == "__main__":
                 args.extend(["--install-dir", os.path.dirname(current_script)])
             args.extend(passed_args)
             
-            # AJOUT : Redirection de stdout et stderr vers un fichier log pour pouvoir inspecter
-            # les plantages en cas de problème ultérieur, au lieu de les noyer dans DEVNULL.
             log_file_path = os.path.join(appdata_dir, "updater_debug.log")
             debug_log = open(log_file_path, "w", encoding="utf-8")
             kwargs = {
