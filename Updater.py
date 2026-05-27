@@ -18,6 +18,16 @@ ssl._create_default_https_context = ssl._create_unverified_context
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
+# AJOUT : Injection du chemin d'installation original dans sys.path AVANT les imports locaux
+# Cela permet au processus détaché dans AppData de trouver le module TriCoreDownloader.config.
+if "--install-dir" in sys.argv:
+    try:
+        idx = sys.argv.index("--install-dir")
+        install_dir_path = sys.argv[idx + 1]
+        sys.path.insert(0, os.path.abspath(install_dir_path))
+    except IndexError:
+        pass
+
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QPushButton, QFrame, 
                              QMessageBox, QComboBox, QCheckBox, QLayout, QSizePolicy,
@@ -784,10 +794,14 @@ if __name__ == "__main__":
                 args.extend(["--install-dir", os.path.dirname(current_script)])
             args.extend(passed_args)
             
+            # AJOUT : Redirection de stdout et stderr vers un fichier log pour pouvoir inspecter
+            # les plantages en cas de problème ultérieur, au lieu de les noyer dans DEVNULL.
+            log_file_path = os.path.join(appdata_dir, "updater_debug.log")
+            debug_log = open(log_file_path, "w", encoding="utf-8")
             kwargs = {
                 "stdin": subprocess.DEVNULL,
-                "stdout": subprocess.DEVNULL,
-                "stderr": subprocess.DEVNULL
+                "stdout": debug_log,
+                "stderr": subprocess.STDOUT
             }
             if os.name == 'nt':
                 kwargs['creationflags'] = 0x00000008 | 0x00000200
