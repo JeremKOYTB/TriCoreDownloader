@@ -336,6 +336,39 @@ class UiInteractionsMixin:
         self.config["ctr_model"] = model
         self.trigger_auto_save()
 
+    def _handle_nsp_toggle(self, checked):
+        if checked:
+            title = self.T("nsp_warning_title") if hasattr(self, "T") else "Avertissement !"
+            msg = self.T("nsp_warning_msg") if hasattr(self, "T") else "La création de fichiers NSP est expérimentale et destinée UNIQUEMENT à la préservation ou aux tests sur émulateur. N'installez PAS ces NSP sur une console physique, cela pourrait causer une corruption.\n\nÊtes-vous sûr de vouloir activer cette option ?"
+            
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle(title)
+            msg_box.setText(msg)
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            
+            btn_yes_text = self.T("btn_yes") if hasattr(self, "T") else "Oui"
+            btn_no_text = self.T("btn_no") if hasattr(self, "T") else "Non"
+            
+            btn_yes = msg_box.addButton(btn_yes_text, QMessageBox.ButtonRole.YesRole)
+            btn_no = msg_box.addButton(btn_no_text, QMessageBox.ButtonRole.NoRole)
+            msg_box.setDefaultButton(btn_no)
+            
+            if hasattr(self, "get_app_icon"):
+                msg_box.setWindowIcon(self.get_app_icon())
+            
+            msg_box.exec()
+            
+            if msg_box.clickedButton() == btn_no:
+                self.chk_build_nsp.blockSignals(True)
+                self.chk_build_nsp.setChecked(False)
+                self.chk_build_nsp.blockSignals(False)
+                if hasattr(self, "config"):
+                    self.config["build_nsp"] = False
+                return
+                
+        if hasattr(self, "config"):
+            self.config["build_nsp"] = checked
+
     def update_dynamic_ui(self):
         is_nx = self.current_console == "NX"
         is_ctr = self.current_console == "CTR"
@@ -418,6 +451,18 @@ class UiInteractionsMixin:
             self.btn_update.setText(self.T("btn_update"))
             
         self.refresh_dynamic_icons()
+
+        # --- GESTION DU BOUTON NSP EXACTEMENT AU BON MOMENT ---
+        if hasattr(self, "chk_build_nsp"):
+            show_nsp = bool(is_adv and is_nx)
+            self.chk_build_nsp.setVisible(show_nsp)
+
+            if not show_nsp:
+                self.chk_build_nsp.blockSignals(True)
+                self.chk_build_nsp.setChecked(False)
+                self.chk_build_nsp.blockSignals(False)
+                if hasattr(self, "config"):
+                    self.config["build_nsp"] = False
 
     def set_ui_locked(self, locked):
         self.btn_tab_cfg.setEnabled(not locked)

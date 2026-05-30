@@ -154,6 +154,9 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
         if hasattr(self, "radio_manual") and hasattr(self, "radio_latest"):
             self.radio_manual.toggled.connect(self.update_dynamic_ui)
             self.radio_latest.toggled.connect(self.update_dynamic_ui)
+            
+        if hasattr(self, "chk_build_nsp"):
+            self.chk_build_nsp.clicked.connect(self._handle_nsp_toggle)
         
         if hasattr(self, "console"): 
             limit = 0 if self.config.get("unlimited_console", False) else 1000

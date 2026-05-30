@@ -225,7 +225,7 @@ STRINGS_EN = {
     "rb_indicators": "Indicators (Checkboxes/Radios)",
     "rb_text": "Options Text",
     "rb_inputs": "Field Borders",
-    "rb_console": "Console Text",
+    "rb_console": "Live Activity Console",
     "lbl_rb_speed": "Speed",
     "lbl_color": "Color",
 
@@ -474,6 +474,14 @@ STRINGS_EN = {
     "err_dl_net": "Network connection failure with Nintendo CDN.",
     "log_reason": "Reason:",
     "log_fail_detail": "Details: {0}",
+    "nsp_warning_title": "Warning!",
+    "nsp_warning_msg": "Building NSP files is experimental and intended ONLY for preservation or emulator testing.\n\nDO NOT install this NSP on a real physical console, it may cause corruption.\n\nAre you sure you want to enable this option?",
+    "build_nsp_checkbox": "Generate an NSP file\n(Not Recommended)",
+    "log_building_nsp": "Building NSP...",
+    "log_nsp_created": "NSP created: {}",
+    "log_nsp_sha256": "NSP SHA256: {}",
+    "log_nsp_failed": "NSP compilation failed. Only ZIP is provided.",
+    "tt_build_nsp": "Allows you to build the firmware in NSP format",
 
     # ==========================================
     # --- 10. LOGS: CAFE ENGINE (WII U) ---

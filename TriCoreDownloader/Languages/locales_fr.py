@@ -225,7 +225,7 @@ STRINGS_FR = {
     "rb_indicators": "Indicateurs (Cases/Radios)",
     "rb_text": "Texte des options",
     "rb_inputs": "Bordures des champs",
-    "rb_console": "Texte de la console",
+    "rb_console": "Console d'activité en direct",
     "lbl_rb_speed": "Vitesse",
     "lbl_color": "Couleur",
 
@@ -474,6 +474,14 @@ STRINGS_FR = {
     "err_dl_net": "Échec de la connexion réseau avec le CDN Nintendo.",
     "log_reason": "Raison :",
     "log_fail_detail": "Détails : {0}",
+    "nsp_warning_title": "Avertissement !",
+    "nsp_warning_msg": "La création de fichiers NSP est expérimentale et destinée UNIQUEMENT à la préservation ou aux tests sur émulateur.\n\nN'installez PAS ce NSP sur une vraie console physique, cela pourrait causer une corruption.\n\nÊtes-vous sûr de vouloir activer cette option ?",
+    "build_nsp_checkbox": "Générer en NSP\n(Non recommandé)",
+    "log_building_nsp": "Création du NSP en cours...",
+    "log_nsp_created": "NSP créé : {}",
+    "log_nsp_sha256": "SHA256 du NSP : {}",
+    "log_nsp_failed": "Échec de la compilation du NSP. Seul le fichier ZIP est fourni.",
+    "tt_build_nsp": "Permet de compiler le firmware au format NSP",
 
     # ==========================================
     # --- 10. LOGS : MOTEUR CAFE (WII U) ---

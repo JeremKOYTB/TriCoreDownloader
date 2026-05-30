@@ -24,7 +24,7 @@ from cryptography.hazmat.backends import default_backend
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from .worker_ops import WorkerOperations
-from .switch_core import SwitchCore
+from .switch_core import SwitchCore, NSPRepacker
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -47,6 +47,11 @@ class DownloaderWorker(QThread, WorkerOperations):
         self.seen_titles, self.queued_ncas = set(), set()
         self.expected_hashes, self.update_files, self.update_dls = {}, [], []
         self.sv_nca_fat, self.sv_nca_exfat, self.device_id, self.user_agent = "", "", None, None
+        
+        self.pfs0_map = {
+            "tik": [], "cert": [], "meta_nca": [], "meta_xml": [],
+            1: [], 2: [], 3: [], 4: [], 5: [], 6: []
+        }
         
         self._dl_lock = threading.Lock()
         
@@ -179,7 +184,7 @@ class DownloaderWorker(QThread, WorkerOperations):
             try:
                 return super().nin_request(method, sticky_url, **kwargs)
             except HTTPError as e:
-                if e.response is not None and e.response.status_code == 404 and "010000000000081B" in url:
+                if e.response is not None and e.response.status_code == 404 and "010000000000081b" in url.lower():
                     raise e 
                 last_e = e
                 with self._dl_lock:
@@ -198,18 +203,18 @@ class DownloaderWorker(QThread, WorkerOperations):
     def dltitle(self, title_id, version, is_su=False):
         if not self.is_running: raise RuntimeError("STOPPED")
         
-        t_id_upper = str(title_id).upper()
+        t_id_lower = str(title_id).lower()
         
-        if self.config.get("exclude_exfat", False) and t_id_upper == "010000000000081B":
-            self.log_adv(self.T("log_skip_exfat", "Skipped exFAT title.").format(t_id_upper))
+        if self.config.get("exclude_exfat", False) and t_id_lower == "010000000000081b":
+            self.log_adv(self.T("log_skip_exfat", "Skipped exFAT title.").format(t_id_lower))
             return
             
-        key = (t_id_upper, version, is_su)
+        key = (t_id_lower, version, is_su)
         with self._dl_lock:
             if key in self.seen_titles: return
             self.seen_titles.add(key)
         
-        self.log_adv(f"Processing Title: {t_id_upper} (Ver: {version})")
+        self.log_adv(f"Processing Title: {t_id_lower} (Ver: {version})")
         
         p = "s" if is_su else "a"
         try: 
@@ -217,20 +222,21 @@ class DownloaderWorker(QThread, WorkerOperations):
             cnmt_id = resp.headers["X-Nintendo-Content-ID"]
         except HTTPError as e:
             if e.response is not None and e.response.status_code == 404:
-                self.log_adv(f"INFO: Title {t_id_upper} version {version} not found (404).")
-                if t_id_upper == "010000000000081B":
+                self.log_adv(f"INFO: Title {t_id_lower} version {version} not found (404).")
+                if t_id_lower == "010000000000081b":
                     with self._dl_lock: self.sv_nca_exfat = ""
                 return
             raise
         except Exception as e:
             if str(e) == "STOPPED": raise RuntimeError("STOPPED")
-            if t_id_upper == "010000000000081B": 
+            if t_id_lower == "010000000000081b": 
                 with self._dl_lock: self.sv_nca_exfat = ""
             return
             
         cnmt_nca = os.path.join(self.raw_dir, f"{cnmt_id}.cnmt.nca")
         with self._dl_lock:
             self.update_files.append(cnmt_nca)
+            self.pfs0_map["meta_nca"].append(cnmt_nca)
             
         if not os.path.exists(cnmt_nca): 
             self.dlfile(f"https://atumn.hac.{self.env}.d4c.nintendo.net/c/{p}/{cnmt_id}?device_id={self.device_id}", cnmt_nca, force_requests=True)
@@ -240,20 +246,24 @@ class DownloaderWorker(QThread, WorkerOperations):
         if is_su:
             workers = min(16, (os.cpu_count() or 4) * 4)
             with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
-                futures = [ex.submit(self.dltitle, n_t_id, ver, False) for n_t_id, ver in parsed_data]
+                futures = [ex.submit(self.dltitle, n_t_id, ver, False) for n_t_id, ver, _ in parsed_data]
                 for f in concurrent.futures.as_completed(futures):
                     if not self.is_running: raise RuntimeError("STOPPED")
                     f.result()
         else:
             with self._dl_lock:
-                for nca_id, nca_hash in parsed_data:
-                    if t_id_upper == "0100000000000809": self.sv_nca_fat = f"{nca_id}.nca"
-                    elif t_id_upper == "010000000000081B": self.sv_nca_exfat = f"{nca_id}.nca"
+                for nca_id, nca_hash, entry_type in parsed_data:
+                    if t_id_lower == "0100000000000809": self.sv_nca_fat = f"{nca_id}.nca"
+                    elif t_id_lower == "010000000000081b": self.sv_nca_exfat = f"{nca_id}.nca"
                     
                     if nca_id not in self.queued_ncas:
                         self.queued_ncas.add(nca_id)
                         nca_target = os.path.join(self.raw_dir, f"{nca_id}.nca")
                         self.update_files.append(nca_target)
+                        
+                        if entry_type in self.pfs0_map:
+                            self.pfs0_map[entry_type].append(nca_target)
+                            
                         self.expected_hashes[nca_target] = nca_hash
                         if not os.path.exists(nca_target):
                             self.update_dls.append((f"https://atumn.hac.{self.env}.d4c.nintendo.net/c/c/{nca_id}?device_id={self.device_id}", self.raw_dir, f"{nca_id}.nca", nca_hash))
@@ -405,8 +415,8 @@ class DownloaderWorker(QThread, WorkerOperations):
             self.progress_signal.emit(5, 100)
 
             if not getattr(self, "sv_nca_exfat", "") and not self.config.get("exclude_exfat", False):
-                self.log_adv(self.T("log_exfat_fallback", "INFO: exFAT not found via meta — direct attempt 010000000000081B…"))
-                self.dltitle("010000000000081B", ver_raw, is_su=False)
+                self.log_adv(self.T("log_exfat_fallback", "INFO: exFAT not found via meta — direct attempt 010000000000081b…"))
+                self.dltitle("010000000000081b", ver_raw, is_su=False)
                 if not getattr(self, "sv_nca_exfat", ""):
                     self.log_adv(self.T("log_exfat_missing", "INFO: No separate SystemVersion exFAT found for this firmware version."))
             elif self.config.get("exclude_exfat", False):
@@ -477,6 +487,8 @@ class DownloaderWorker(QThread, WorkerOperations):
                 self.log("") 
                 self.update_text_progress(0, total_files, self.T("log_compressing_zip"), is_first=True)
                 
+            build_nsp = self.config.get("build_nsp", False)
+            
             with ZipFile(out_zip, "w", compression=ZIP_STORED) as zf:
                 for i, full in enumerate(file_paths, 1):
                     if not self.is_running: raise RuntimeError("STOPPED")
@@ -505,7 +517,51 @@ class DownloaderWorker(QThread, WorkerOperations):
                     
                     if not adv:
                         self.update_text_progress(i, total_files, self.T("log_compressing_zip"))
-                    self.progress_signal.emit(90 + int((i / total_files) * 10), 100)
+                    if build_nsp:
+                        self.progress_signal.emit(90 + int((i / total_files) * 5), 100) # ZIP prend 90-95%
+                    else:
+                        self.progress_signal.emit(90 + int((i / total_files) * 10), 100) # ZIP prend 90-100%
+
+            if build_nsp:
+                out_nsp = f"{work_dir}.nsp"
+                self.log_adv(self.T("log_building_nsp", "Building NSP..."), raw=True)
+                print("[NX WORKER] Repacking raw files into NSP...")
+                
+                if not adv:
+                    self.log("")
+                    self.update_text_progress(0, total_files, self.T("log_building_nsp", "Building NSP..."), is_first=True)
+                
+                try:
+                    if os.path.exists(out_nsp):
+                        os.remove(out_nsp)
+                        
+                    def _nsp_progress_cb(current, total):
+                        if not adv:
+                            self.update_text_progress(current, total, self.T("log_building_nsp", "Building NSP..."))
+                        self.progress_signal.emit(95 + int((current / total) * 5), 100) # NSP prend 95-100%
+                        
+                    repacker = NSPRepacker(
+                        out_nsp, 
+                        self.pfs0_map, 
+                        log_callback=lambda m: self.log_adv(m) if adv else None,
+                        progress_callback=_nsp_progress_cb
+                    )
+                    repacker.repack()
+                    
+                    if repacker.verify_integrity():
+                        h_nsp = hashlib.sha256()
+                        with open(out_nsp, "rb") as f:
+                            for chunk in iter(lambda: f.read(4194304), b""):
+                                h_nsp.update(chunk)
+                        nsp_sha256 = h_nsp.hexdigest()
+                        self.log(self.T("log_nsp_created", "NSP created: {}").format(os.path.basename(out_nsp)))
+                        self.log(self.T("log_nsp_sha256", "NSP SHA256: {}").format(nsp_sha256))
+                    else:
+                        self.log(self.T("log_nsp_failed", "NSP compilation failed. Only ZIP is provided."))
+                        
+                except Exception as e:
+                    print(f"[NX WORKER ERROR] NSP Repacking failed: {e}")
+                    self.log(self.T("log_nsp_failed", "NSP compilation failed. Only ZIP is provided."))
 
             shutil.rmtree(self.raw_dir, ignore_errors=True)
             

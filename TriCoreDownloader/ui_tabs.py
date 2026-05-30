@@ -2,7 +2,7 @@ import os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QLineEdit, QPushButton, QProgressBar, QFrame, 
                              QRadioButton, QScrollArea, QButtonGroup, 
-                             QSizePolicy, QPlainTextEdit)
+                             QSizePolicy, QPlainTextEdit, QCheckBox)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QTextOption
 
@@ -180,6 +180,13 @@ class UiTabsMixin:
         self.scroll_layout.addWidget(self.radio_manual)
         self.scroll_layout.addWidget(self.manual_input_container)
         
+        self.chk_build_nsp = QCheckBox()
+        self.chk_build_nsp.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.chk_build_nsp.setVisible(False)
+        if hasattr(self, "config"):
+            self.chk_build_nsp.setChecked(self.config.get("build_nsp", False))
+            
+        self.scroll_layout.addWidget(self.chk_build_nsp)
         self.scroll_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         
         self.scroll_area.setWidget(self.scroll_content)

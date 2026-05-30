@@ -4,6 +4,7 @@ import hashlib
 import subprocess
 import stat
 import concurrent.futures
+import re
 
 SUBPROCESS_FLAGS = {"creationflags": 0x08000000} if os.name == "nt" else {}
 
