@@ -452,7 +452,6 @@ class UiInteractionsMixin:
             
         self.refresh_dynamic_icons()
 
-        # --- GESTION DU BOUTON NSP EXACTEMENT AU BON MOMENT ---
         if hasattr(self, "chk_build_nsp"):
             show_nsp = bool(is_adv and is_nx)
             self.chk_build_nsp.setVisible(show_nsp)
