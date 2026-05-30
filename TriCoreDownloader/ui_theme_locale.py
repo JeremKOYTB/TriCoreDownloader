@@ -248,7 +248,6 @@ class UiThemeLocaleMixin:
         if hasattr(self, "lbl_grp_live"): self.lbl_grp_live.setText(self.T("grp_live"))
         if hasattr(self, "btn_clear_console"): self.btn_clear_console.setText(self.T("btn_clear_console"))
 
-        # TRADUCTION DYNAMIQUE DU BOUTON ICI
         if hasattr(self, "chk_build_nsp"):
             self.chk_build_nsp.setText(self.T("build_nsp_checkbox"))
             self.chk_build_nsp.setToolTip(self.T("tt_build_nsp"))
