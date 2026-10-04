@@ -21,15 +21,24 @@ CDNS = [
 ]
 
 SHARED_SESSION = requests.Session()
-_adapter = HTTPAdapter(pool_connections=32, pool_maxsize=32, max_retries=3, pool_block=False)
+_adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64, max_retries=3, pool_block=False)
 SHARED_SESSION.mount('http://', _adapter)
 SHARED_SESSION.mount('https://', _adapter)
 SHARED_SESSION.verify = False
-SHARED_SESSION.headers.update({'User-Agent': 'Nintendo 3DS (CTR-001)'})
+SHARED_SESSION.headers.update({
+    'User-Agent': 'Nintendo 3DS (CTR-001)',
+    'Connection': 'keep-alive'
+})
+
+RE_FW = re.compile(r"(\d+)\.(\d+)\.(\d+)-(\d+)")
+STRUCT_BE_I = struct.Struct(">I")
+STRUCT_BE_H = struct.Struct(">H")
+STRUCT_BE_Q = struct.Struct(">Q")
 
 def parse_fw_string(fw_str: str) -> tuple:
-    match = re.search(r"(\d+)\.(\d+)\.(\d+)-(\d+)", fw_str)
-    if match: return tuple(int(x) for x in match.groups())
+    match = RE_FW.search(fw_str)
+    if match:
+        return tuple(int(x) for x in match.groups())
     return (0, 0, 0, 0)
 
 def _safe_unlink(path: Path):
@@ -47,56 +56,60 @@ def _safe_unlink(path: Path):
 
 def download_in_memory(url: str, is_stopped_cb=None, retries=3, log_cb=None, T_cb=None, adv_logs=False) -> tuple:
     for attempt in range(retries):
-        if adv_logs and log_cb and T_cb:
-            log_cb(T_cb("log_http_req").format(url, 'Nintendo 3DS (CTR-001)', attempt + 1, retries))
+        if is_stopped_cb and is_stopped_cb():
+            return None, "STOPPED"
+        if adv_logs and log_cb:
+            log_cb(f"  [HTTP GET] -> {url} ({attempt + 1}/{retries})")
             
         try:
-            r = SHARED_SESSION.get(url, timeout=10)
+            r = SHARED_SESSION.get(url, timeout=(5, 10))
             status = r.status_code
             
-            if is_stopped_cb and is_stopped_cb():
-                return None, "STOPPED"
-                
             if status == 200:
+                content = r.content
                 if adv_logs and log_cb and T_cb:
-                    log_cb(T_cb("log_http_res").format(status, len(r.content)))
-                return r.content, status
+                    log_cb(f"  [HTTP 200 OK] " + T_cb("log_http_res").format(status, len(content)))
+                return content, status
             else:
-                if adv_logs and log_cb and T_cb:
-                    log_cb(T_cb("log_http_err").format(status, r.reason))
+                if adv_logs and log_cb:
+                    log_cb(f"  [HTTP ERR {status}] -> {url}")
                 if attempt == retries - 1:
                     return None, status
                     
         except Exception as e:
-            if adv_logs and log_cb and T_cb:
-                log_cb(T_cb("log_http_fail").format(e))
+            if adv_logs and log_cb:
+                log_cb(f"  [HTTP FAIL] {e}")
             if attempt == retries - 1:
                 return None, str(e)
             
-        time.sleep(1)
+        time.sleep(0.5)
         
     return None, "TIMEOUT"
 
 def get_yls_db(sys_type: str, is_stopped_cb=None) -> dict:
     url = f"https://yls8.mtheall.com/ninupdates/titlelist.php?sys={sys_type}&csv=1"
     csv_data, status = download_in_memory(url, is_stopped_cb)
-    if not csv_data: return {}
+    if not csv_data:
+        return {}
 
-    lines = csv_data.decode('utf-8').splitlines()
+    lines = csv_data.decode('utf-8', errors='ignore').splitlines()
     db = {}
     reader = csv.reader(lines)
     next(reader, None) 
 
     for row in reader:
-        if len(row) < 4: continue
+        if len(row) < 4:
+            continue
         t_id, region = row[0].strip().upper(), row[1].strip().upper()
         t_vers, f_vers = row[2].strip().split(), row[3].strip().split()
         
-        if region not in db: db[region] = {}
-        if t_id not in db[region]: db[region][t_id] = []
+        if region not in db:
+            db[region] = {}
+        if t_id not in db[region]:
+            db[region][t_id] = []
         
         for tv_str, fv_str in zip(t_vers, f_vers):
-            tv_clean = int(tv_str.replace('v', '')) if tv_str.startswith('v') else int(tv_str)
+            tv_clean = int(tv_str[1:]) if tv_str.startswith('v') else int(tv_str)
             db[region][t_id].append((parse_fw_string(fv_str), tv_clean))
             
     return db
@@ -110,7 +123,8 @@ def download_raw_files(title_id: str, output_dir: Path, version: int, T_cb, is_s
         log_cb(T_cb("log_dl_start").format(title_id, version))
 
     for cdn in CDNS:
-        if is_stopped_cb and is_stopped_cb(): return False, "STOPPED"
+        if is_stopped_cb and is_stopped_cb():
+            return False, "STOPPED"
         base_url = f"{cdn}/{title_id}"
         
         if not tmd_data:
@@ -131,30 +145,31 @@ def download_raw_files(title_id: str, output_dir: Path, version: int, T_cb, is_s
                 last_error = status
 
     if not tmd_data or not cetk_data: 
-        if advanced_logs and log_cb: log_cb(T_cb("err_cdn_dl").format(title_id))
+        if advanced_logs and log_cb:
+            log_cb(T_cb("err_dl_fail_adv").format(title_id, last_error))
         return False, last_error
 
     (output_dir / "tmd.bin").write_bytes(tmd_data)
     (output_dir / "tik.bin").write_bytes(cetk_data)
 
-    tmd_sig_type = struct.unpack(">I", tmd_data[0:4])[0]
+    tmd_sig_type = STRUCT_BE_I.unpack_from(tmd_data, 0)[0]
     tmd_sig_len = get_sig_len(tmd_sig_type)
-    content_count = struct.unpack(">H", tmd_data[tmd_sig_len+0x9E : tmd_sig_len+0xA0])[0]
-    
-    if advanced_logs and log_cb:
-        log_cb(T_cb("log_tmd_parsed").format(tmd_sig_type, content_count))
+    content_count = STRUCT_BE_H.unpack_from(tmd_data, tmd_sig_len + 0x9E)[0]
 
     c_ids = []
     c_offset = tmd_sig_len + 0x9C4
     for i in range(content_count):
         off = c_offset + (i * 0x30)
-        cid = tmd_data[off:off+4].hex().lower()
+        cid = tmd_data[off : off + 4].hex().lower()
         c_ids.append(cid)
         if advanced_logs and log_cb:
             log_cb(T_cb("log_tmd_cid").format(i, cid))
 
     servers_to_try = [successful_base_url] if successful_base_url else []
-    servers_to_try += [f"{cdn}/{title_id}" for cdn in CDNS if f"{cdn}/{title_id}" not in servers_to_try]
+    for cdn in CDNS:
+        url_candidate = f"{cdn}/{title_id}"
+        if url_candidate not in servers_to_try:
+            servers_to_try.append(url_candidate)
 
     for cid in c_ids:
         if is_stopped_cb and is_stopped_cb():
@@ -166,29 +181,30 @@ def download_raw_files(title_id: str, output_dir: Path, version: int, T_cb, is_s
             for attempt in range(3):
                 try:
                     req_url = f"{base_url}/{cid}"
-                    if advanced_logs and log_cb: log_cb(T_cb("log_req_fragment").format(req_url))
-                    
-                    with SHARED_SESSION.get(req_url, stream=True, timeout=15) as r:
+                    if advanced_logs and log_cb:
+                        log_cb(T_cb("log_req_fragment").format(req_url))
+                        
+                    with SHARED_SESSION.get(req_url, stream=True, timeout=(5, 15)) as r:
                         if r.status_code == 200:
                             with open(content_path, "wb") as f:
-                                for chunk in r.iter_content(chunk_size=4194304):
+                                for chunk in r.iter_content(chunk_size=1048576):
                                     if is_stopped_cb and is_stopped_cb():
+                                        _safe_unlink(content_path)
                                         return False, "STOPPED"
                                     if chunk:
                                         f.write(chunk)
-                            
                             fragment_downloaded = True
-                            if advanced_logs and log_cb: log_cb(T_cb("log_frag_saved").format(content_path.stat().st_size))
+                            if advanced_logs and log_cb:
+                                log_cb(T_cb("log_frag_saved").format(content_path.stat().st_size))
                             break
                         else:
                             last_error = r.status_code
-                            if advanced_logs and log_cb: log_cb(T_cb("err_frag_http").format(r.status_code, req_url))
-                            time.sleep(1)
+                            time.sleep(0.5)
                 except Exception as e:
                     last_error = str(e)
-                    if advanced_logs and log_cb: log_cb(T_cb("err_frag_fail").format(e))
-                    time.sleep(1)
-            if fragment_downloaded: break
+                    time.sleep(0.5)
+            if fragment_downloaded:
+                break
 
         if not fragment_downloaded: 
             return False, last_error
@@ -197,28 +213,35 @@ def download_raw_files(title_id: str, output_dir: Path, version: int, T_cb, is_s
 
 def verify_integrity(title_id: str, output_dir: Path, T_cb, is_stopped_cb=None, log_cb=None, advanced_logs=False) -> bool:
     tmd_path = output_dir / "tmd.bin"
-    if not tmd_path.exists(): return False
+    tik_path = output_dir / "tik.bin"
+    if not tmd_path.exists() or not tik_path.exists():
+        return False
     
     tmd_data = tmd_path.read_bytes()
-    tmd_sig_type = struct.unpack(">I", tmd_data[0:4])[0]
+    tmd_sig_type = STRUCT_BE_I.unpack_from(tmd_data, 0)[0]
     tmd_sig_len = get_sig_len(tmd_sig_type)
-    content_count = struct.unpack(">H", tmd_data[tmd_sig_len+0x9E : tmd_sig_len+0xA0])[0]
+    content_count = STRUCT_BE_H.unpack_from(tmd_data, tmd_sig_len + 0x9E)[0]
     c_offset = tmd_sig_len + 0x9C4
 
     for i in range(content_count):
-        if is_stopped_cb and is_stopped_cb(): return False
+        if is_stopped_cb and is_stopped_cb():
+            return False
         
         off = c_offset + (i * 0x30)
-        cid = tmd_data[off:off+4].hex().lower()
-        expected_size = struct.unpack(">Q", tmd_data[off+0x08 : off+0x10])[0]
+        cid = tmd_data[off : off + 4].hex().lower()
+        expected_size = STRUCT_BE_Q.unpack_from(tmd_data, off + 8)[0]
         
         content_path = output_dir / cid
-        if not content_path.exists(): return False
-
-        actual_size = content_path.stat().st_size
-        if actual_size != expected_size: 
-            if advanced_logs and log_cb: log_cb(T_cb("err_size_invalid").format(cid, expected_size, actual_size))
+        try:
+            if content_path.stat().st_size != expected_size:
+                if advanced_logs and log_cb:
+                    log_cb(T_cb("err_size_invalid"))
+                return False
+        except OSError:
             return False
+
+    if advanced_logs and log_cb:
+        log_cb(T_cb("log_pack_success").format(title_id))
 
     return True
 
@@ -226,14 +249,15 @@ def pack_cia(title_id: str, tmp_title_dir: Path, final_out_dir: Path, T_cb, boot
     tmd_path = tmp_title_dir / "tmd.bin"
     tik_path = tmp_title_dir / "tik.bin"
     
-    if not tmd_path.exists() or not tik_path.exists(): return False
+    if not tmd_path.exists() or not tik_path.exists():
+        return False
     
     tmd_data = tmd_path.read_bytes()
     cetk_data = tik_path.read_bytes()
         
-    tmd_sig_type = struct.unpack(">I", tmd_data[0:4])[0]
+    tmd_sig_type = STRUCT_BE_I.unpack_from(tmd_data, 0)[0]
     tmd_sig_len = get_sig_len(tmd_sig_type)
-    actual_version = struct.unpack(">H", tmd_data[tmd_sig_len+0x9C : tmd_sig_len+0x9E])[0]
+    actual_version = STRUCT_BE_H.unpack_from(tmd_data, tmd_sig_len + 0x9C)[0]
     
     cia_path = final_out_dir / f"{title_id}_v{actual_version}.cia"
     
@@ -257,7 +281,8 @@ def pack_cia(title_id: str, tmp_title_dir: Path, final_out_dir: Path, T_cb, boot
 
     is_valid, msg = verify_built_cia(cia_path, T_cb, log_cb=log_cb, advanced_logs=advanced_logs)
     if not is_valid:
-        if log_cb: log_cb(T_cb("err_pack_cia").format(msg))
+        if log_cb:
+            log_cb(T_cb("err_pack_cia") + f" : {msg}")
         _safe_unlink(cia_path)
         return False
     elif advanced_logs and log_cb:

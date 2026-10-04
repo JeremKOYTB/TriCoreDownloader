@@ -23,27 +23,84 @@ QRadioButton, QCheckBox {{ font-size: 10pt; color: #212529; padding: 2px; }}
 QRadioButton:checked {{ color: #7E57C2; font-weight: 600; }}
 QRadioButton::indicator {{ width: 14px; height: 14px; border-radius: 8px; border: 2px solid #ADB5BD; background-color: transparent; }}
 QRadioButton::indicator:unchecked:hover {{ border: 2px solid #7E57C2; }}
-QRadioButton::indicator:checked {{ border: 2px solid #ADB5BD; background-color: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 #7E57C2, stop:0.55 #7E57C2, stop:0.65 transparent); }}
+QRadioButton::indicator::checked {{ border: 2px solid #ADB5BD; background-color: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 #7E57C2, stop:0.55 #7E57C2, stop:0.65 transparent); }}
 QCheckBox::indicator {{ width: 14px; height: 14px; border-radius: 4px; border: 2px solid #ADB5BD; background-color: transparent; }}
 QCheckBox::indicator:checked {{ background-color: #7E57C2; border: 2px solid #7E57C2; image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23FFFFFF' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E"); }}
 QLineEdit, QComboBox {{ background-color: #F8F9FA; border: 1px solid #CED4DA; border-radius: 6px; padding: 8px 12px; color: #212529; font-size: 10pt; min-height: 20px; }}
+QComboBox {{ combobox-popup: 0; }}
 QLineEdit:focus, QComboBox:focus {{ border: 1px solid #7E57C2; background-color: #FFFFFF; }}
 QLineEdit:read-only {{ background-color: #E9ECEF; color: #495057; }}
 QComboBox::drop-down {{ border: none; width: 24px; }}
-QComboBox QListView {{ background-color: #FFFFFF; color: #212529; selection-background-color: #E9ECEF; selection-color: #212529; border: 1px solid #CED4DA; outline: none; }}
-QComboBox QListView::item {{ padding: 6px; }}
+QComboBox QAbstractItemView {{ background-color: #FFFFFF; color: #212529; selection-background-color: #E9ECEF; selection-color: #212529; border: 1px solid #CED4DA; border-radius: 6px; outline: none; }}
+QComboBox QAbstractItemView::item {{ padding: 6px 10px; min-height: 24px; }}
 QPushButton {{ background-color: #E9ECEF; color: #212529; border-radius: 6px; padding: 8px 16px; font-weight: 600; border: 1px solid #CED4DA; min-height: 20px; }}
 QPushButton:hover {{ background-color: #DEE2E6; }}
 QPushButton:pressed {{ background-color: #7E57C2; color: #FFFFFF; border: 1px solid #7E57C2; }}
-#btnDownload {{ background-color: #7E57C2; color: #FFFFFF; font-size: 11pt; padding: 12px 24px; border-radius: 8px; border: none; }}
-#btnDownload:hover {{ background-color: #512DA8; }}
-#btnDownload:disabled {{ background-color: #E9ECEF; color: #ADB5BD; border: none; }}
-#btnStop {{ background-color: #DC3545; color: #FFFFFF; font-size: 11pt; padding: 12px 24px; border-radius: 8px; border: none; }}
+
+QPushButton#ConsoleSelector, QPushButton#btnHeader,
+QPushButton#BtnUpdateApp, QPushButton#btnUpdateApp,
+QPushButton#BtnCheckUpdate, QPushButton#btnCheckUpdate,
+QPushButton#BtnUpdate, QPushButton#btnUpdate,
+QPushButton#BtnAppUpdate, QPushButton#btnAppUpdate {{
+    background-color: #FFFFFF;
+    border: 1px solid #CED4DA;
+    border-radius: 8px;
+    padding: 8px 16px;
+    color: #212529;
+    text-align: left;
+    font-weight: 600;
+    font-size: 11pt;
+    min-height: 34px;
+}}
+QPushButton#ConsoleSelector:hover, QPushButton#btnHeader:hover,
+QPushButton#BtnUpdateApp:hover, QPushButton#btnUpdateApp:hover,
+QPushButton#BtnCheckUpdate:hover, QPushButton#btnCheckUpdate:hover,
+QPushButton#BtnUpdate:hover, QPushButton#btnUpdate:hover,
+QPushButton#BtnAppUpdate:hover, QPushButton#btnAppUpdate:hover {{
+    background-color: #F8F9FA;
+    border: 1px solid #7E57C2;
+}}
+
+QMenu#ConsoleCustomMenu {{
+    background-color: #FFFFFF;
+    border: 1px solid #CED4DA;
+    border-radius: 8px;
+    padding: 4px;
+    icon-size: 24px;
+}}
+QMenu#ConsoleCustomMenu::item {{
+    padding: 10px 16px 10px 18px;
+    color: #212529;
+    border-radius: 6px;
+    font-size: 11pt;
+    font-weight: 500;
+    min-height: 28px;
+}}
+QMenu#ConsoleCustomMenu::item:selected {{
+    background-color: #E9ECEF;
+    color: #212529;
+}}
+QMenu#ConsoleCustomMenu::icon {{
+    position: absolute;
+    left: 12px;
+    subcontrol-origin: padding;
+    subcontrol-position: center left;
+}}
+
+#btnDownload, #btnHeader {{ background-color: #7E57C2; color: #FFFFFF; font-size: 11pt; font-weight: 600; padding: 8px 16px; min-height: 34px; border-radius: 8px; border: none; }}
+#btnDownload:hover, #btnHeader:hover {{ background-color: #512DA8; }}
+#btnDownload:disabled, #btnHeader:disabled {{ background-color: #E9ECEF; color: #ADB5BD; border: none; }}
+#btnEulaOk {{ background-color: #7E57C2; color: #FFFFFF; font-size: 10pt; font-weight: 600; padding: 8px 24px; min-height: 20px; border-radius: 6px; border: none; }}
+#btnEulaOk:hover {{ background-color: #512DA8; }}
+#btnEulaCancel {{ background-color: transparent; color: #DC3545; border: 1px solid #DC3545; border-radius: 6px; padding: 8px 20px; font-size: 10pt; font-weight: 600; min-height: 20px; outline: none; }}
+#btnEulaCancel:hover {{ background-color: #F8D7DA; }}
+#btnStop {{ background-color: #DC3545; color: #FFFFFF; font-size: 11pt; font-weight: 600; padding: 8px 16px; min-height: 34px; border-radius: 8px; border: none; }}
 #btnStop:hover {{ background-color: #C82333; }}
-#btnReset {{ background-color: transparent; color: #DC3545; border: 1px solid #DC3545; border-radius: 6px; padding: 8px 16px; font-size: 10pt; outline: none; }}
+#btnReset {{ background-color: transparent; color: #DC3545; border: 1px solid #DC3545; border-radius: 8px; padding: 8px 16px; font-size: 11pt; font-weight: 600; min-height: 34px; outline: none; }}
 #btnReset:hover {{ background-color: #F8D7DA; }}
 #btnReset:disabled {{ color: #ADB5BD; border-color: #ADB5BD; background-color: transparent; }}
-#btnActionDialog {{ background-color: #7E57C2; color: #FFFFFF; border-radius: 6px; font-weight: 600; font-size: 10pt; padding: 8px 16px; border: none; }}
+#btnActionDialog {{ background-color: #7E57C2; color: #FFFFFF; border-radius: 8px; font-weight: 600; font-size: 11pt; padding: 8px 16px; min-height: 34px; border: none; }}
+
 QTextEdit, QTextEdit:focus, QTextEdit:read-only, QTextEdit:disabled {{ background-color: #FFFFFF; border: 1px solid #CED4DA; color: #495057; font-family: Consolas, monospace; font-size: 9pt; border-radius: 6px; padding: 8px; }}
 QScrollBar:vertical {{ background-color: transparent; width: 10px; margin: 0px; }}
 QScrollBar::handle:vertical {{ background-color: #CED4DA; border-radius: 5px; min-height: 24px; }}
@@ -91,27 +148,84 @@ QRadioButton, QCheckBox {{ font-size: 10pt; color: #E8E8E8; padding: 2px; }}
 QRadioButton:checked {{ color: #C4A1FF; font-weight: 600; }}
 QRadioButton::indicator {{ width: 14px; height: 14px; border-radius: 8px; border: 2px solid #8A8A95; background-color: transparent; }}
 QRadioButton::indicator:unchecked:hover {{ border: 2px solid #C4A1FF; }}
-QRadioButton::indicator:checked {{ border: 2px solid #8A8A95; background-color: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 #C4A1FF, stop:0.55 #C4A1FF, stop:0.65 transparent); }}
+QRadioButton::indicator::checked {{ border: 2px solid #8A8A95; background-color: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 #C4A1FF, stop:0.55 #C4A1FF, stop:0.65 transparent); }}
 QCheckBox::indicator {{ width: 14px; height: 14px; border-radius: 4px; border: 2px solid #8A8A95; background-color: transparent; }}
 QCheckBox::indicator:checked {{ background-color: #C4A1FF; border: 2px solid #C4A1FF; image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233C3C44' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E"); }}
 QLineEdit, QComboBox {{ background-color: #32323A; border: 1px solid #555560; border-radius: 6px; padding: 8px 12px; color: #E8E8E8; font-size: 10pt; min-height: 20px; }}
+QComboBox {{ combobox-popup: 0; }}
 QLineEdit:focus, QComboBox:focus {{ border: 1px solid #C4A1FF; background-color: #3C3C44; }}
 QLineEdit:read-only {{ background-color: #42424C; color: #C0C0C8; }}
 QComboBox::drop-down {{ border: none; width: 24px; }}
-QComboBox QListView {{ background-color: #4A4A54; color: #E8E8E8; selection-background-color: #5A5A66; selection-color: #FFFFFF; border: 1px solid #555560; outline: none; }}
-QComboBox QListView::item {{ padding: 6px; }}
+QComboBox QAbstractItemView {{ background-color: #4A4A54; color: #E8E8E8; selection-background-color: #5A5A66; selection-color: #FFFFFF; border: 1px solid #555560; border-radius: 6px; outline: none; }}
+QComboBox QAbstractItemView::item {{ padding: 6px 10px; min-height: 24px; }}
 QPushButton {{ background-color: #555560; color: #E8E8E8; border-radius: 6px; padding: 8px 16px; font-weight: 600; border: 1px solid #626270; min-height: 20px; }}
 QPushButton:hover {{ background-color: #626270; }}
 QPushButton:pressed {{ background-color: #C4A1FF; color: #3C3C44; border: 1px solid #C4A1FF; }}
-#btnDownload {{ background-color: #C4A1FF; color: #2B2B30; font-size: 11pt; padding: 12px 24px; border-radius: 8px; border: none; }}
-#btnDownload:hover {{ background-color: #8C54FF; }}
-#btnDownload:disabled {{ background-color: #555560; color: #8A8A95; border: none; }}
-#btnStop {{ background-color: #EF5350; color: #FFFFFF; font-size: 11pt; padding: 12px 24px; border-radius: 8px; border: none; }}
+
+QPushButton#ConsoleSelector, QPushButton#btnHeader,
+QPushButton#BtnUpdateApp, QPushButton#btnUpdateApp,
+QPushButton#BtnCheckUpdate, QPushButton#btnCheckUpdate,
+QPushButton#BtnUpdate, QPushButton#btnUpdate,
+QPushButton#BtnAppUpdate, QPushButton#btnAppUpdate {{
+    background-color: #32323A;
+    border: 1px solid #555560;
+    border-radius: 8px;
+    padding: 8px 16px;
+    color: #E8E8E8;
+    text-align: left;
+    font-weight: 600;
+    font-size: 11pt;
+    min-height: 34px;
+}}
+QPushButton#ConsoleSelector:hover, QPushButton#btnHeader:hover,
+QPushButton#BtnUpdateApp:hover, QPushButton#btnUpdateApp:hover,
+QPushButton#BtnCheckUpdate:hover, QPushButton#btnCheckUpdate:hover,
+QPushButton#BtnUpdate:hover, QPushButton#btnUpdate:hover,
+QPushButton#BtnAppUpdate:hover, QPushButton#btnAppUpdate:hover {{
+    background-color: #3C3C44;
+    border: 1px solid #C4A1FF;
+}}
+
+QMenu#ConsoleCustomMenu {{
+    background-color: #32323A;
+    border: 1px solid #555560;
+    border-radius: 8px;
+    padding: 4px;
+    icon-size: 24px;
+}}
+QMenu#ConsoleCustomMenu::item {{
+    padding: 10px 16px 10px 18px;
+    color: #E8E8E8;
+    border-radius: 6px;
+    font-size: 11pt;
+    font-weight: 500;
+    min-height: 28px;
+}}
+QMenu#ConsoleCustomMenu::item:selected {{
+    background-color: #4A4A54;
+    color: #FFFFFF;
+}}
+QMenu#ConsoleCustomMenu::icon {{
+    position: absolute;
+    left: 12px;
+    subcontrol-origin: padding;
+    subcontrol-position: center left;
+}}
+
+#btnDownload, #btnHeader {{ background-color: #C4A1FF; color: #2B2B30; font-size: 11pt; font-weight: 600; padding: 8px 16px; min-height: 34px; border-radius: 8px; border: none; }}
+#btnDownload:hover, #btnHeader:hover {{ background-color: #8C54FF; }}
+#btnDownload:disabled, #btnHeader:disabled {{ background-color: #555560; color: #8A8A95; border: none; }}
+#btnEulaOk {{ background-color: #C4A1FF; color: #2B2B30; font-size: 10pt; font-weight: 600; padding: 8px 24px; min-height: 20px; border-radius: 6px; border: none; }}
+#btnEulaOk:hover {{ background-color: #8C54FF; }}
+#btnEulaCancel {{ background-color: transparent; color: #EF5350; border: 1px solid #EF5350; border-radius: 6px; padding: 8px 20px; font-size: 10pt; font-weight: 600; min-height: 20px; outline: none; }}
+#btnEulaCancel:hover {{ background-color: #4A1C1C; }}
+#btnStop {{ background-color: #EF5350; color: #FFFFFF; font-size: 11pt; font-weight: 600; padding: 8px 16px; min-height: 34px; border-radius: 8px; border: none; }}
 #btnStop:hover {{ background-color: #E53935; }}
-#btnReset {{ background-color: transparent; color: #EF5350; border: 1px solid #EF5350; border-radius: 6px; padding: 8px 16px; font-size: 10pt; outline: none; }}
+#btnReset {{ background-color: transparent; color: #EF5350; border: 1px solid #EF5350; border-radius: 8px; padding: 8px 16px; font-size: 11pt; font-weight: 600; min-height: 34px; outline: none; }}
 #btnReset:hover {{ background-color: #4A1C1C; }}
 #btnReset:disabled {{ color: #8A8A95; border-color: #8A8A95; background-color: transparent; }}
-#btnActionDialog {{ background-color: #C4A1FF; color: #2B2B30; border-radius: 6px; font-weight: 600; font-size: 10pt; padding: 8px 16px; border: none; }}
+#btnActionDialog {{ background-color: #C4A1FF; color: #2B2B30; border-radius: 8px; font-weight: 600; font-size: 11pt; padding: 8px 16px; min-height: 34px; border: none; }}
+
 QTextEdit, QTextEdit:focus, QTextEdit:read-only, QTextEdit:disabled {{ background-color: #32323A; border: 1px solid #555560; color: #D0D0D5; font-family: Consolas, monospace; font-size: 9pt; border-radius: 6px; padding: 8px; }}
 QScrollBar:vertical {{ background-color: transparent; width: 10px; margin: 0px; }}
 QScrollBar::handle:vertical {{ background-color: #5A5A66; border-radius: 5px; min-height: 24px; }}
@@ -158,28 +272,85 @@ QRadioButton, QCheckBox {{ font-size: 10pt; color: #E0E0E0; padding: 2px; }}
 QRadioButton:checked {{ color: #C4A1FF; font-weight: 600; }}
 QRadioButton::indicator {{ width: 14px; height: 14px; border-radius: 8px; border: 2px solid #616161; background-color: transparent; }}
 QRadioButton::indicator:unchecked:hover {{ border: 2px solid #C4A1FF; }}
-QRadioButton::indicator:checked {{ border: 2px solid #616161; background-color: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 #C4A1FF, stop:0.55 #C4A1FF, stop:0.65 transparent); }}
+QRadioButton::indicator::checked {{ border: 2px solid #616161; background-color: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 #C4A1FF, stop:0.55 #C4A1FF, stop:0.65 transparent); }}
 QCheckBox::indicator {{ width: 14px; height: 14px; border-radius: 4px; border: 2px solid #616161; background-color: transparent; }}
 QCheckBox::indicator:checked {{ background-color: #C4A1FF; border: 2px solid #616161; image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000000' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E"); }}
 QLineEdit, QComboBox {{ background-color: #000000; border: 1px solid #333333; border-radius: 6px; padding: 8px 12px; color: #E0E0E0; font-size: 10pt; min-height: 20px; }}
+QComboBox {{ combobox-popup: 0; }}
 QLineEdit:focus, QComboBox:focus {{ border: 1px solid #C4A1FF; background-color: #111111; }}
 QComboBox:hover {{ background-color: #111111; border: 1px solid #555555; }}
 QLineEdit:read-only {{ background-color: #111111; color: #757575; }}
 QComboBox::drop-down {{ border: none; width: 24px; }}
-QComboBox QListView {{ background-color: #000000; color: #E0E0E0; selection-background-color: #111111; selection-color: #FFFFFF; border: 1px solid #333333; outline: none; }}
-QComboBox QListView::item {{ padding: 6px; }}
+QComboBox QAbstractItemView {{ background-color: #000000; color: #E0E0E0; selection-background-color: #111111; selection-color: #FFFFFF; border: 1px solid #333333; border-radius: 6px; outline: none; }}
+QComboBox QAbstractItemView::item {{ padding: 6px 10px; min-height: 24px; }}
 QPushButton {{ background-color: #111111; color: #E0E0E0; border-radius: 6px; padding: 8px 16px; font-weight: 600; border: 1px solid #333333; min-height: 20px; }}
 QPushButton:hover {{ background-color: #212121; }}
 QPushButton:pressed {{ background-color: #C4A1FF; color: #000000; border: 1px solid #C4A1FF; }}
-#btnDownload {{ background-color: #C4A1FF; color: #000000; font-size: 11pt; padding: 12px 24px; border-radius: 8px; border: none; }}
-#btnDownload:hover {{ background-color: #8C54FF; }}
-#btnDownload:disabled {{ background-color: #111111; color: #424242; border: none; }}
-#btnStop {{ background-color: #EF5350; color: #000000; font-size: 11pt; padding: 12px 24px; border-radius: 8px; border: none; }}
+
+QPushButton#ConsoleSelector, QPushButton#btnHeader,
+QPushButton#BtnUpdateApp, QPushButton#btnUpdateApp,
+QPushButton#BtnCheckUpdate, QPushButton#btnCheckUpdate,
+QPushButton#BtnUpdate, QPushButton#btnUpdate,
+QPushButton#BtnAppUpdate, QPushButton#btnAppUpdate {{
+    background-color: #000000;
+    border: 1px solid #333333;
+    border-radius: 8px;
+    padding: 8px 16px;
+    color: #E0E0E0;
+    text-align: left;
+    font-weight: 600;
+    font-size: 11pt;
+    min-height: 34px;
+}}
+QPushButton#ConsoleSelector:hover, QPushButton#btnHeader:hover,
+QPushButton#BtnUpdateApp:hover, QPushButton#btnUpdateApp:hover,
+QPushButton#BtnCheckUpdate:hover, QPushButton#btnCheckUpdate:hover,
+QPushButton#BtnUpdate:hover, QPushButton#btnUpdate:hover,
+QPushButton#BtnAppUpdate:hover, QPushButton#btnAppUpdate:hover {{
+    background-color: #111111;
+    border: 1px solid #C4A1FF;
+}}
+
+QMenu#ConsoleCustomMenu {{
+    background-color: #000000;
+    border: 1px solid #333333;
+    border-radius: 8px;
+    padding: 4px;
+    icon-size: 24px;
+}}
+QMenu#ConsoleCustomMenu::item {{
+    padding: 10px 16px 10px 18px;
+    color: #E0E0E0;
+    border-radius: 6px;
+    font-size: 11pt;
+    font-weight: 500;
+    min-height: 28px;
+}}
+QMenu#ConsoleCustomMenu::item:selected {{
+    background-color: #111111;
+    color: #FFFFFF;
+}}
+QMenu#ConsoleCustomMenu::icon {{
+    position: absolute;
+    left: 12px;
+    subcontrol-origin: padding;
+    subcontrol-position: center left;
+}}
+
+#btnDownload, #btnHeader {{ background-color: #C4A1FF; color: #000000; font-size: 11pt; font-weight: 600; padding: 8px 16px; min-height: 34px; border-radius: 8px; border: none; }}
+#btnDownload:hover, #btnHeader:hover {{ background-color: #8C54FF; }}
+#btnDownload:disabled, #btnHeader:disabled {{ background-color: #111111; color: #424242; border: none; }}
+#btnEulaOk {{ background-color: #C4A1FF; color: #000000; font-size: 10pt; font-weight: 600; padding: 8px 24px; min-height: 20px; border-radius: 6px; border: none; }}
+#btnEulaOk:hover {{ background-color: #8C54FF; }}
+#btnEulaCancel {{ background-color: transparent; color: #EF5350; border: 1px solid #EF5350; border-radius: 6px; padding: 8px 20px; font-size: 10pt; font-weight: 600; min-height: 20px; outline: none; }}
+#btnEulaCancel:hover {{ background-color: #1F0D0D; }}
+#btnStop {{ background-color: #EF5350; color: #000000; font-size: 11pt; font-weight: 600; padding: 8px 16px; min-height: 34px; border-radius: 8px; border: none; }}
 #btnStop:hover {{ background-color: #E53935; }}
-#btnReset {{ background-color: transparent; color: #EF5350; border: 1px solid #EF5350; border-radius: 6px; padding: 8px 16px; font-size: 10pt; outline: none; }}
+#btnReset {{ background-color: transparent; color: #EF5350; border: 1px solid #EF5350; border-radius: 8px; padding: 8px 16px; font-size: 11pt; font-weight: 600; min-height: 34px; outline: none; }}
 #btnReset:hover {{ background-color: #1F0D0D; }}
 #btnReset:disabled {{ color: #424242; border-color: #424242; background-color: transparent; }}
-#btnActionDialog {{ background-color: #C4A1FF; color: #000000; border-radius: 6px; font-weight: 600; font-size: 10pt; padding: 8px 16px; border: none; }}
+#btnActionDialog {{ background-color: #C4A1FF; color: #000000; border-radius: 8px; font-weight: 600; font-size: 11pt; padding: 8px 16px; min-height: 34px; border: none; }}
+
 QTextEdit, QTextEdit:focus, QTextEdit:read-only, QTextEdit:disabled {{ background-color: #000000; border: 1px solid #212121; color: #9E9E9E; font-family: Consolas, monospace; font-size: 9pt; border-radius: 6px; padding: 8px; }}
 QScrollBar:vertical {{ background-color: transparent; width: 10px; margin: 0px; }}
 QScrollBar::handle:vertical {{ background-color: #333333; border-radius: 5px; min-height: 24px; }}
@@ -206,38 +377,35 @@ QSlider::sub-page:horizontal {{ background: #C4A1FF; border-radius: 3px; }}
 QSlider::add-page:horizontal {{ background: #111111; border-radius: 3px; }}
 """
 
+_CONSOLE_DEFAULTS = {
+    "NX": ("#7E57C2", "#C4A1FF"),
+    "CTR": ("#BC181A", "#BC181A"),
+    "CAFE": ("#009AC7", "#4EBCFF")
+}
+
+_STYLE_CACHE = {}
+_COLOR_CACHE = {}
+
+def _get_hover_color(color_hex):
+    if color_hex in _COLOR_CACHE:
+        return _COLOR_CACHE[color_hex]
+    c = QColor(color_hex)
+    hover_hex = c.darker(120).name() if c.isValid() else color_hex
+    _COLOR_CACHE[color_hex] = hover_hex
+    return hover_hex
+
 def update_app_theme(app, theme_pref, custom_accent="", console_mode="NX"):
-    console_defaults = {
-        "NX":    ("#7E57C2", "#C4A1FF"), 
-        "CTR":  ("#E60012", "#E60012"), 
-        "CAFE": ("#009AC7", "#009AC7")  
-    }
+    if not app:
+        return
 
     if custom_accent and QColor(custom_accent).isValid():
         light_accent = custom_accent
         dark_accent = custom_accent
     else:
-        light_accent, dark_accent = console_defaults.get(console_mode, console_defaults["NX"])
-    
-    c_light = QColor(light_accent)
-    light_hover = c_light.darker(120).name() if c_light.isValid() else light_accent
-    
-    c_dark = QColor(dark_accent)
-    dark_hover = c_dark.darker(120).name() if c_dark.isValid() else dark_accent
+        light_accent, dark_accent = _CONSOLE_DEFAULTS.get(console_mode, _CONSOLE_DEFAULTS["NX"])
 
-    light_style = STYLESHEET_LIGHT.replace("#7E57C2", light_accent).replace("#512DA8", light_hover)
-    dark_style = STYLESHEET_DARK.replace("#C4A1FF", dark_accent).replace("#8C54FF", dark_hover)
-    oled_style = STYLESHEET_OLED.replace("#C4A1FF", dark_accent).replace("#8C54FF", dark_hover)
-
-    print(f"LOG_THEME_APPLIED_MODE_{console_mode}_ACCENT_{light_accent}")
-
-    if theme_pref == "light":
-        app.setStyleSheet(light_style)
-    elif theme_pref == "dark":
-        app.setStyleSheet(dark_style)
-    elif theme_pref == "oled":
-        app.setStyleSheet(oled_style)
-    else:
+    effective_theme = theme_pref
+    if effective_theme == "auto":
         is_dark = True
         try:
             scheme = app.styleHints().colorScheme()
@@ -245,5 +413,24 @@ def update_app_theme(app, theme_pref, custom_accent="", console_mode="NX"):
         except AttributeError:
             palette = app.palette()
             is_dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
-            
-        app.setStyleSheet(dark_style if is_dark else light_style)
+        effective_theme = "dark" if is_dark else "light"
+
+    cache_key = (effective_theme, light_accent, dark_accent)
+    if cache_key in _STYLE_CACHE:
+        target_style = _STYLE_CACHE[cache_key]
+    else:
+        if effective_theme == "light":
+            light_hover = _get_hover_color(light_accent)
+            target_style = STYLESHEET_LIGHT.replace("#7E57C2", light_accent).replace("#512DA8", light_hover)
+        elif effective_theme == "oled":
+            dark_hover = _get_hover_color(dark_accent)
+            target_style = STYLESHEET_OLED.replace("#C4A1FF", dark_accent).replace("#8C54FF", dark_hover)
+        else:
+            dark_hover = _get_hover_color(dark_accent)
+            target_style = STYLESHEET_DARK.replace("#C4A1FF", dark_accent).replace("#8C54FF", dark_hover)
+        _STYLE_CACHE[cache_key] = target_style
+
+    if app.styleSheet() != target_style:
+        app.setStyleSheet(target_style)
+
+    print(f"LOG_THEME_APPLIED_MODE_{console_mode}_ACCENT_{light_accent}")

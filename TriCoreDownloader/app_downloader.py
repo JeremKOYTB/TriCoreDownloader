@@ -4,23 +4,230 @@ import re
 import shutil
 import subprocess
 import traceback
-from PyQt6.QtWidgets import QMessageBox, QDialog, QVBoxLayout, QLabel, QCheckBox, QHBoxLayout, QPushButton, QApplication, QSizePolicy
-from PyQt6.QtCore import Qt, QTimer
+import json
+import urllib.request
+import urllib.error
+from PyQt6.QtWidgets import (QMessageBox, QDialog, QVBoxLayout, QLabel, 
+                             QCheckBox, QHBoxLayout, QPushButton, QApplication, QSizePolicy)
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt6.QtGui import QTextCursor
 
-from .config import save_config
+from .config import save_config, APPDATA_DIR
 from .app_utils_dialogs import OtpInputDialog
 from .NX.worker import DownloaderWorker
 from .CAFE.worker import CafeDownloaderWorker
 from .CTR.worker import CtrDownloaderWorker
 from .logos import CHECK_SVG, CROSS_SVG
 
+RE_VER = re.compile(r"(\d+(?:\.\d+)+)")
+RE_BUILD_VER = re.compile(r"\((\d+\.\d+\.\d+\.\d+)\)")
+RE_R_ALREADY = re.compile(r"\bR(\d+)\b")
+RE_RB = re.compile(r"[\[\(]?\b(?:rebootless(?:\s+update)?|r\.+te(?:\s*update)?)\s*(\d+)?[\]\)]?", re.IGNORECASE)
+RE_TAG_R = re.compile(r"(?:[._-]r|(?:\d+\.\d+\.\d+)r)(\d*)\b", re.IGNORECASE)
+RE_CHN = re.compile(r"\bchina\??\b|\[china\??\]|\(china\??\)", re.IGNORECASE)
+RE_BETA = re.compile(r"\[pre-release\]|\bpre-release\b|\bprerelease\b|\bbeta\b", re.IGNORECASE)
+RE_HEX32 = re.compile(r"^[A-Fa-f0-9]{32}$")
+RE_NX_VER = re.compile(r"^\d+\.\d+\.\d+\.\d+$")
+RE_CAFE_VER = re.compile(r"^\d+\.\d+\.\d+[EUJ]$")
+RE_CTR_VER = re.compile(r"^\d+\.\d+\.\d+-\d+$")
+
+def format_fw_display_title(raw_title, tag_name="", body="", is_prerelease=False):
+    if not raw_title:
+        return ""
+    m_ver = RE_VER.search(raw_title)
+    if not m_ver and tag_name:
+        m_ver = RE_VER.search(tag_name)
+    if not m_ver:
+        return raw_title
+    ver_str = m_ver.group(1)
+    base = f"Firmware {ver_str}"
+    
+    combined = f"{raw_title} {tag_name} {body[:300]}"
+    tags = []
+    
+    m_r_already = RE_R_ALREADY.search(raw_title)
+    if m_r_already:
+        tags.append(f"R{m_r_already.group(1)}")
+    else:
+        m_rb = RE_RB.search(combined)
+        if m_rb and m_rb.group(0).strip().lower() not in ["", "r"]:
+            num = m_rb.group(1)
+            tags.append(f"R{num}" if num else "R1")
+        else:
+            m_tag = RE_TAG_R.search(tag_name)
+            if m_tag:
+                num = m_tag.group(1)
+                tags.append(f"R{num}" if num else "R1")
+                
+    if "[CHN]" in raw_title:
+        tags.append("[CHN]")
+    elif RE_CHN.search(combined) or "chn" in tag_name.lower():
+        tags.append("[CHN]")
+
+    if "Beta" in raw_title.split():
+        tags.append("Beta")
+    elif is_prerelease or RE_BETA.search(combined):
+        tags.append("Beta")
+        
+    if tags:
+        return f"{base} {' '.join(tags)}"
+    return base
+
+class NxFirmwareListThread(QThread):
+    firmwares_loaded_signal = pyqtSignal(list)
+
+    def __init__(self, cache_file):
+        super().__init__()
+        self.cache_file = cache_file
+
+    def run(self):
+        etag = ""
+        cached_firmwares = []
+        if os.path.exists(self.cache_file):
+            try:
+                with open(self.cache_file, "r", encoding="utf-8") as f:
+                    cache_data = json.load(f)
+                    if cache_data.get("cache_version") == 5:
+                        etag = cache_data.get("etag", "")
+                    cached_firmwares = cache_data.get("firmwares", [])
+            except Exception:
+                pass
+
+        headers = {
+            "User-Agent": "TriCoreDownloader",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        if etag:
+            headers["If-None-Match"] = etag
+
+        url = "https://api.github.com/repos/JeremKOYTB/NX_Firmware/releases?per_page=100"
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=10) as response:
+                new_etag = response.headers.get("ETag", "")
+                raw_data = response.read().decode("utf-8")
+                releases = json.loads(raw_data)
+
+            firmwares = []
+            for rel in releases:
+                title = rel.get("name") or rel.get("tag_name", "")
+                tag = rel.get("tag_name", "").strip()
+                body = rel.get("body", "")
+                is_pre = bool(rel.get("prerelease", False) or "[pre-release]" in title.lower() or "pre-release" in title.lower() or "prerelease" in title.lower())
+
+                if "cartridge" in title.lower() or "cartridge" in tag.lower():
+                    continue
+
+                m_ver = RE_VER.search(title) or RE_VER.search(tag)
+                if m_ver and m_ver.group(1) in ["1.0.0", "8.1.1"]:
+                    continue
+
+                build_match = RE_BUILD_VER.findall(body)
+                build_ver = build_match[-1] if build_match else ""
+                
+                if not build_ver:
+                    tag_clean = tag.lstrip("v")
+                    tag_parts = tag_clean.split(".")
+                    if len(tag_parts) == 3:
+                        build_ver = f"{tag_clean}.0"
+                    elif len(tag_parts) == 4:
+                        build_ver = tag_clean
+
+                if build_ver == "8.1.1.0030":
+                    continue
+
+                if build_ver:
+                    clean_display = format_fw_display_title(title, tag, body, is_pre)
+                    firmwares.append({
+                        "title": clean_display,
+                        "raw_title": title.strip(),
+                        "build_version": build_ver,
+                        "tag_name": tag,
+                        "is_prerelease": is_pre
+                    })
+
+            if firmwares:
+                try:
+                    os.makedirs(os.path.dirname(self.cache_file), exist_ok=True)
+                    with open(self.cache_file, "w", encoding="utf-8") as f:
+                        json.dump({"cache_version": 5, "etag": new_etag, "firmwares": firmwares}, f, indent=2)
+                except Exception:
+                    pass
+                self.firmwares_loaded_signal.emit(firmwares)
+
+        except urllib.error.HTTPError as e:
+            if e.code == 304 and cached_firmwares:
+                self.firmwares_loaded_signal.emit(cached_firmwares)
+            elif cached_firmwares:
+                self.firmwares_loaded_signal.emit(cached_firmwares)
+        except Exception:
+            if cached_firmwares:
+                self.firmwares_loaded_signal.emit(cached_firmwares)
+
 class DownloadManagerMixin:
+    def init_nx_firmware_list(self):
+        try:
+            appdata_dir = str(APPDATA_DIR)
+        except Exception:
+            appdata_dir = os.environ.get("APPDATA", "")
+            if not appdata_dir:
+                appdata_dir = os.path.expanduser("~\\AppData\\Roaming\\TriCoreDownloader" if sys.platform == "win32" else "~/.config/TriCoreDownloader")
+            else:
+                appdata_dir = os.path.join(appdata_dir, "TriCoreDownloader")
+                
+        os.makedirs(appdata_dir, exist_ok=True)
+        self.nx_fw_cache_file = os.path.join(appdata_dir, "nx_firmwares_cache.json")
+
+        if os.path.exists(self.nx_fw_cache_file):
+            try:
+                with open(self.nx_fw_cache_file, "r", encoding="utf-8") as f:
+                    cache_data = json.load(f)
+                    fws = cache_data.get("firmwares", [])
+                    if fws:
+                        self.populate_nx_firmware_list(fws)
+            except Exception:
+                pass
+
+        self.nx_fw_thread = NxFirmwareListThread(self.nx_fw_cache_file)
+        self.nx_fw_thread.firmwares_loaded_signal.connect(self.populate_nx_firmware_list)
+        self.nx_fw_thread.start()
+
+    def populate_nx_firmware_list(self, firmwares):
+        if not hasattr(self, "combo_nx_fw") or not firmwares:
+            return
+        current_data = self.combo_nx_fw.currentData()
+        self.combo_nx_fw.blockSignals(True)
+        self.combo_nx_fw.clear()
+        
+        for fw in firmwares:
+            raw_title = fw.get("raw_title") or fw.get("title", "")
+            tag_name = fw.get("tag_name", "")
+            is_pre = fw.get("is_prerelease", False)
+
+            if "cartridge" in raw_title.lower() or "cartridge" in tag_name.lower():
+                continue
+            m_ver = RE_VER.search(raw_title) or RE_VER.search(tag_name)
+            if m_ver and m_ver.group(1) in ["1.0.0", "8.1.1"]:
+                continue
+            if fw.get("build_version") == "8.1.1.0030":
+                continue
+
+            display_title = format_fw_display_title(raw_title, tag_name, is_prerelease=is_pre)
+            self.combo_nx_fw.addItem(display_title, userData=fw["build_version"])
+            idx = self.combo_nx_fw.count() - 1
+            self.combo_nx_fw.setItemData(idx, Qt.AlignmentFlag.AlignCenter, Qt.ItemDataRole.TextAlignmentRole)
+
+        if current_data:
+            idx = self.combo_nx_fw.findData(current_data)
+            if idx >= 0:
+                self.combo_nx_fw.setCurrentIndex(idx)
+        self.combo_nx_fw.blockSignals(False)
+
     def append_log(self, text):
         if hasattr(self, "console"):
             self.console.appendPlainText(text)
             self.console.verticalScrollBar().setValue(self.console.verticalScrollBar().maximum())
-            print(f"[WORKER LOG] {text}")
+        print(f"[WORKER LOG] {text}")
 
     def replace_last_log(self, text):
         if not hasattr(self, "console"): 
@@ -37,9 +244,15 @@ class DownloadManagerMixin:
 
     def update_progress(self, current, total):
         if hasattr(self, "progress_bar"):
-            self.progress_bar.setMaximum(total)
+            if self.progress_bar.maximum() != total:
+                self.progress_bar.setMaximum(total)
             self.progress_bar.setValue(current)
-            self.lbl_progress_pct.setText(f"{int((current / total) * 100)}%" if total > 0 else "0%")
+            
+        if hasattr(self, "lbl_progress_pct"):
+            pct = int((current / total) * 100) if total > 0 else 0
+            if getattr(self, "_last_rendered_pct", None) != pct:
+                self._last_rendered_pct = pct
+                self.lbl_progress_pct.setText(f"{pct}%")
 
     def show_centered_msg(self, title, text):
         dialog = QDialog(self)
@@ -148,6 +361,7 @@ class DownloadManagerMixin:
         self.console.clear()
         self.progress_bar.setValue(0)
         self.lbl_progress_pct.setText("0%")
+        self._last_rendered_pct = 0
         self.btn_action.setText(self.T("btn_stop"))
         self.btn_action.setObjectName("btnStop")
         self.btn_action.style().unpolish(self.btn_action)
@@ -203,7 +417,6 @@ class DownloadManagerMixin:
             self.worker.stop()
             self.btn_action.setEnabled(False)
             
-            QApplication.processEvents()
             self.audio.play_stop(self.current_console)
             
             self.spinner_timer.stop()
@@ -217,7 +430,6 @@ class DownloadManagerMixin:
         if out_dir and not os.path.exists(out_dir):
             if not self.verify_and_create_export_folder(out_dir):
                 print("[DOWNLOADER] Root target validation rejected.")
-                QApplication.processEvents()
                 self.audio.play_result(self.current_console, False)
                 self.switch_tab_animated(1)
                 return
@@ -229,7 +441,6 @@ class DownloadManagerMixin:
             if hasattr(self, "input_hactool"): self.config["hactool"] = self.input_hactool.text().strip()
             if hasattr(self, "input_keys"): self.config["prod_keys"] = self.input_keys.text().strip()
             if hasattr(self, "input_prodinfo"): self.config["prodinfo"] = self.input_prodinfo.text().strip()
-            if hasattr(self, "input_cert"): self.config["cert_pem"] = self.input_cert.text().strip()
         elif mode == "CTR":
             if hasattr(self, "input_boot9"): self.config["boot9_path"] = self.input_boot9.text().strip()
             if hasattr(self, "chk_ctr_decrypt"): self.config["decrypt_cia"] = self.chk_ctr_decrypt.isChecked()
@@ -238,22 +449,28 @@ class DownloadManagerMixin:
             
         if mode == "NX":
             version = ""
-            if hasattr(self, "radio_group") and self.radio_group.checkedButton() != getattr(self, "radio_latest", None):
-                version = self.input_manual.text().strip()
-                if not re.match(r"^\d+\.\d+\.\d+\.\d+$", version):
-                    print(f"[DOWNLOADER ERROR] Bad payload syntax for manual Horizon version target: {version}")
-                    QApplication.processEvents()
-                    self.audio.play_result(self.current_console, False)
-                    self.show_centered_msg(self.T("err_format_title"), self.T("err_format_msg"))
-                    return
+            if hasattr(self, "radio_group"):
+                if hasattr(self, "radio_manual") and self.radio_manual.isChecked():
+                    version = self.input_manual.text().strip()
+                    if not RE_NX_VER.match(version):
+                        print(f"[DOWNLOADER ERROR] Bad payload syntax for manual Horizon version target: {version}")
+                        self.audio.play_result(self.current_console, False)
+                        self.show_centered_msg(self.T("err_format_title"), self.T("err_format_msg"))
+                        return
+                elif hasattr(self, "radio_list") and self.radio_list.isChecked():
+                    if hasattr(self, "combo_nx_fw"):
+                        version = self.combo_nx_fw.currentData() or ""
+                    if not version or not RE_NX_VER.match(version):
+                        self.audio.play_result(self.current_console, False)
+                        self.show_centered_msg(self.T("msg_error_title"), self.T("err_no_fw_selected"))
+                        return
                     
-            req = ["hactool", "prod_keys", "prodinfo", "cert_pem", "output_dir"]
-            label_map = {"hactool": "lbl_hactool", "prod_keys": "lbl_keys", "prodinfo": "lbl_prodinfo", "cert_pem": "lbl_cert", "output_dir": "lbl_out"}
+            req = ["hactool", "prod_keys", "prodinfo", "output_dir"]
+            label_map = {"hactool": "lbl_hactool", "prod_keys": "lbl_keys", "prodinfo": "lbl_prodinfo", "output_dir": "lbl_out"}
             errs = [f"  {self.T(label_map[k])}" for k in req if not self.config.get(k, "").strip() or not os.path.exists(self.config.get(k, "").strip())]
             
             if errs:
                 print("[DOWNLOADER ERROR] Cryptographic extraction dependencies missing.")
-                QApplication.processEvents()
                 self.audio.play_result(self.current_console, False)
                 err_text = self.T("msg_err_cfg") + "\n" + "\n".join(errs)
                 self.show_centered_msg(self.T("msg_error_title"), err_text)
@@ -261,7 +478,6 @@ class DownloadManagerMixin:
                 return
                 
             self.setup_ui_for_download()
-            QApplication.processEvents()
             self.audio.play_start_sequence(self.current_console)
             
             if getattr(self, "worker", None) is not None:
@@ -282,7 +498,6 @@ class DownloadManagerMixin:
                 
         elif mode == "CAFE":
             if not out_dir or not os.path.exists(out_dir):
-                QApplication.processEvents()
                 self.audio.play_result(self.current_console, False)
                 errs = [f"  {self.T('lbl_out')}"]
                 err_text = self.T("msg_err_cfg") + "\n" + "\n".join(errs)
@@ -295,9 +510,8 @@ class DownloadManagerMixin:
             
             if hasattr(self, "radio_group") and self.radio_group.checkedButton() != getattr(self, "radio_latest", None):
                 target_fw = self.input_manual.text().strip().upper()
-                if not re.match(r"^\d+\.\d+\.\d+[EUJ]$", target_fw):
+                if not RE_CAFE_VER.match(target_fw):
                     print(f"[DOWNLOADER ERROR] Manual Cafe identifier pattern violation: {target_fw}")
-                    QApplication.processEvents()
                     self.audio.play_result(self.current_console, False)
                     self.show_centered_msg(self.T("err_format_title"), self.T("err_format_msg_cafe"))
                     return
@@ -325,13 +539,13 @@ class DownloadManagerMixin:
                 self._fallback_key_used = False
                 
             is_file = os.path.isfile(otp_path) if not (force_prompt or ignore_file) else False
-            is_key_valid = (re.match(r"^[A-Fa-f0-9]{32}$", otp_key) is not None) if not force_prompt else False
+            is_key_valid = (RE_HEX32.match(otp_key) is not None) if not force_prompt else False
             
             if is_file:
                 try:
                     if os.path.getsize(otp_path) == 0: 
                         is_file = False
-                except: 
+                except Exception: 
                     is_file = False
                     
             if is_file:
@@ -352,7 +566,7 @@ class DownloadManagerMixin:
                     dialog = OtpInputDialog(self, title, msg, chk_txt, btn_ok_txt, btn_cancel_txt, otp_key)
                     if dialog.exec() == QDialog.DialogCode.Accepted:
                         key, remember = dialog.get_data()
-                        if re.match(r"^[A-Fa-f0-9]{32}$", key):
+                        if RE_HEX32.match(key):
                             otp_input = key
                             is_key = True
                             if remember:
@@ -365,12 +579,10 @@ class DownloadManagerMixin:
                             break
                         else:
                             print("[DOWNLOADER ERROR] Hardware context encryption token verification pattern error.")
-                            QApplication.processEvents()
                             self.audio.play_result(self.current_console, False)
                             self.show_centered_msg(self.T("msg_error_title"), self.T("err_invalid_key"))
                     else:
                         print("[DOWNLOADER] Runtime execution canceled at security gate context.")
-                        QApplication.processEvents()
                         self.audio.play_result(self.current_console, False)
                         return
                         
@@ -381,8 +593,6 @@ class DownloadManagerMixin:
             self.config["cafe_partitions"] = partitions
             self.config["cafe_region"] = region
             self.setup_ui_for_download()
-            
-            QApplication.processEvents()
             self.audio.play_start_sequence(self.current_console)
             
             if self.config.get("advanced_logs", False):
@@ -420,7 +630,6 @@ class DownloadManagerMixin:
                 
         elif mode == "CTR":
             if not out_dir or not os.path.exists(out_dir):
-                QApplication.processEvents()
                 self.audio.play_result(self.current_console, False)
                 errs = [f"  {self.T('lbl_out')}"]
                 err_text = self.T("msg_err_cfg") + "\n" + "\n".join(errs)
@@ -437,9 +646,8 @@ class DownloadManagerMixin:
             
             if hasattr(self, "radio_group") and self.radio_group.checkedButton() != getattr(self, "radio_latest", None):
                 target_fw = self.input_manual.text().strip().upper()
-                if not re.match(r"^\d+\.\d+\.\d+-\d+$", target_fw):
+                if not RE_CTR_VER.match(target_fw):
                     print(f"[DOWNLOADER ERROR] Manual metadata syntax formatting error for CTR target: {target_fw}")
-                    QApplication.processEvents()
                     self.audio.play_result(self.current_console, False)
                     self.show_centered_msg(self.T("err_format_title"), self.T("err_format_msg_ctr"))
                     return
@@ -455,7 +663,6 @@ class DownloadManagerMixin:
                 target_fw = "LATEST"
                 
             self.setup_ui_for_download()
-            QApplication.processEvents()
             self.audio.play_start_sequence(self.current_console)
             
             if self.config.get("advanced_logs", False):
@@ -486,12 +693,15 @@ class DownloadManagerMixin:
     def open_export_folder(self, folder_path):
         print(f"[DOWNLOADER] Sending request to open directory window layout: {folder_path}")
         if folder_path and os.path.exists(folder_path):
-            if sys.platform == "win32": 
-                os.startfile(folder_path)
-            elif sys.platform == "darwin": 
-                subprocess.Popen(["open", folder_path])
-            else: 
-                subprocess.Popen(["xdg-open", folder_path])
+            try:
+                if sys.platform == "win32": 
+                    os.startfile(folder_path)
+                elif sys.platform == "darwin": 
+                    subprocess.Popen(["open", folder_path])
+                else: 
+                    subprocess.Popen(["xdg-open", folder_path])
+            except Exception as e:
+                print(f"[DOWNLOADER ERROR] Failed to open folder: {e}")
 
     def on_download_finished(self, success, message):
         print(f"[DOWNLOADER] Thread processing session terminated. success={success}, metadata={message}")
@@ -526,6 +736,7 @@ class DownloadManagerMixin:
                 
             if hasattr(self, "progress_bar"): self.progress_bar.setValue(0)
             if hasattr(self, "lbl_progress_pct"): self.lbl_progress_pct.setText("0%")
+            self._last_rendered_pct = 0
             
             self.config["otp_key"] = ""
             self.config["otp_path"] = ""
@@ -534,7 +745,6 @@ class DownloadManagerMixin:
             if hasattr(self, "input_otp"):
                 self.input_otp.clear()
                 
-            QApplication.processEvents()
             self.audio.play_result(self.current_console, False)
             self.show_centered_msg(self.T("msg_error_title"), self.T("err_common_key_invalid"))
             QTimer.singleShot(100, self.toggle_download)
@@ -550,7 +760,6 @@ class DownloadManagerMixin:
         
         self.spinner_timer.stop()
         if success:
-            QApplication.processEvents()
             self.audio.play_result(self.current_console, True)
             
             if hasattr(self, "lbl_dl_mode"):
@@ -603,7 +812,7 @@ class DownloadManagerMixin:
             else:
                 if self.config.get(auto_key, False): 
                     self.open_export_folder(self.config.get("output_dir"))
-                else:
+                else: 
                     self.show_centered_msg(self.T("msg_success_title"), self.T("msg_success"))
         else:
             if hasattr(self, "lbl_dl_mode"):
@@ -615,22 +824,21 @@ class DownloadManagerMixin:
                 self.progress_bar.setValue(0)
             if hasattr(self, "lbl_progress_pct"): 
                 self.lbl_progress_pct.setText("0%")
+            self._last_rendered_pct = 0
                 
             msg_incomplete = self.T("err_incomplete_msg")
             
             if message == "INCOMPLETE_FIRMWARE" or message == msg_incomplete:
                 print("[DOWNLOADER ERROR] Extracted payload structural footprint is missing system package dependencies.")
-                QApplication.processEvents()
                 self.audio.play_result(self.current_console, False)
                 self.show_centered_msg(self.T("err_incomplete_title"), msg_incomplete)
                 
             elif message != "STOPPED" and message != self.T("msg_aborted") and message != "Annulé proprement.":
-                QApplication.processEvents()
                 self.audio.play_result(self.current_console, False)
                 
                 if self.current_console == "CAFE" and "OTP" in message.upper():
                     otp_key = self.config.get("otp_key", "").strip()
-                    if not getattr(self, "_fallback_key_used", False) and re.match(r"^[A-Fa-f0-9]{32}$", otp_key):
+                    if not getattr(self, "_fallback_key_used", False) and RE_HEX32.match(otp_key):
                         self._ignore_otp_file_once = True
                         self._fallback_key_used = True
                         QTimer.singleShot(100, self.toggle_download)

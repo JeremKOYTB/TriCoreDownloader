@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (QMessageBox, QWidget, QGraphicsOpacityEffect, QDial
                              QComboBox, QTextBrowser, QVBoxLayout, QHBoxLayout, 
                              QPushButton, QLabel, QCheckBox, QApplication)
 from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QSize, QByteArray
-from PyQt6.QtGui import QIcon, QCursor, QPixmap
+from PyQt6.QtGui import QIcon, QCursor, QPixmap, QColor
 
 from .config import EULA_FILE, CONFIG_FILE, APPDATA_DIR, save_config
 from .custom_widgets import EulaDialog
@@ -15,8 +15,15 @@ from .logos import (NX_LOGO_SVG, CTR_LOGO_WHITE_SVG, CTR_LOGO_BLACK_SVG,
                     CTR_LOGO_CLEAN_SVG, CAFE_LOGO_SVG, VOL_MUTE_SVG, 
                     VOL_LOW_SVG, VOL_HIGH_SVG, RESTART_SVG, TCD_MAIN_LOGO)
 
+_SVG_CACHE = {}
+_VOL_CACHE = {}
+
 class UiInteractionsMixin:
     def verify_application_version(self):
+        if getattr(self, "_eula_active", False):
+            QTimer.singleShot(300, self.verify_application_version)
+            return
+
         from .config import APP_VERSION
         adv_logs = self.config.get("advanced_logs", False)
         
@@ -45,11 +52,8 @@ class UiInteractionsMixin:
             
             dialog.setWindowTitle(self.T("msg_downgrade_title"))
             try:
-                pm = QPixmap()
-                pm.loadFromData(QByteArray(TCD_MAIN_LOGO), "SVG")
-                if not pm.isNull():
-                    dialog.setWindowIcon(QIcon(pm))
-            except:
+                dialog.setWindowIcon(QIcon(self.get_svg_icon(TCD_MAIN_LOGO)))
+            except Exception:
                 pass
 
             layout = QVBoxLayout(dialog)
@@ -90,13 +94,14 @@ class UiInteractionsMixin:
                 sys.exit(0)
             elif choice["action"] == "reset":
                 try:
-                    if CONFIG_FILE.exists(): CONFIG_FILE.unlink()
-                    if EULA_FILE.exists(): EULA_FILE.unlink()
-                except:
+                    if os.path.exists(CONFIG_FILE):
+                        os.remove(CONFIG_FILE)
+                    if os.path.exists(EULA_FILE):
+                        os.remove(EULA_FILE)
+                except Exception:
                     pass
                 subprocess.Popen([sys.executable] + sys.argv)
                 QApplication.quit()
-                sys.exit(0)
             else:
                 self.config.pop("_version_status", None)
                 self.config.pop("_old_version", None)
@@ -108,11 +113,8 @@ class UiInteractionsMixin:
             
             dialog.setWindowTitle(self.T("msg_upgrade_title"))
             try:
-                pm = QPixmap()
-                pm.loadFromData(QByteArray(TCD_MAIN_LOGO), "SVG")
-                if not pm.isNull():
-                    dialog.setWindowIcon(QIcon(pm))
-            except:
+                dialog.setWindowIcon(QIcon(self.get_svg_icon(TCD_MAIN_LOGO)))
+            except Exception:
                 pass
 
             layout = QVBoxLayout(dialog)
@@ -145,11 +147,13 @@ class UiInteractionsMixin:
             self.config.pop("_old_version", None)
 
     def update_update_spinner(self):
-        self.spinner_idx = (self.spinner_idx + 1) % len(self.spinner_frames)
-        self.lbl_update_spinner.setText(self.spinner_frames[self.spinner_idx])
+        if hasattr(self, "lbl_update_spinner") and hasattr(self, "spinner_frames") and self.spinner_frames:
+            self.spinner_idx = (self.spinner_idx + 1) % len(self.spinner_frames)
+            self.lbl_update_spinner.setText(self.spinner_frames[self.spinner_idx])
 
     def manual_check_updates(self, *args):
-        self.start_update_check(auto=False)
+        from .custom_widgets import launch_updater
+        launch_updater(self)
 
     def on_unlimited_console_toggled(self, checked):
         self.config["unlimited_console"] = checked
@@ -163,10 +167,16 @@ class UiInteractionsMixin:
             
         theme_pref = self.config.get("theme", "auto")
         is_dark = theme_pref in ["dark", "oled"] or (theme_pref == "auto" and getattr(self, "get_effective_is_dark", lambda: False)())
+        
+        cache_key = (svg_bytes, is_dark)
+        if cache_key in _SVG_CACHE:
+            return _SVG_CACHE[cache_key]
+            
         color = b"#FFFFFF" if is_dark else b"#333333"
         colored_svg = svg_bytes.replace(b"currentColor", color)
         pixmap = QPixmap()
         pixmap.loadFromData(QByteArray(colored_svg))
+        _SVG_CACHE[cache_key] = pixmap
         return pixmap
 
     def refresh_dynamic_icons(self):
@@ -176,13 +186,14 @@ class UiInteractionsMixin:
         idx = self.console_selector.currentIndex() if hasattr(self, "console_selector") else -1
         active_console = modes[idx] if idx >= 0 and idx < len(modes) else self.config.get("console_mode", "WELCOME")
         
+        theme_pref = self.config.get("theme", "auto")
+        is_dark = theme_pref in ["dark", "oled"] or (theme_pref == "auto" and getattr(self, "get_effective_is_dark", lambda: False)())
+        
         if active_console == "NX":
             self.setWindowIcon(QIcon(self.get_svg_icon(NX_LOGO_SVG)))
         elif active_console == "CAFE":
             self.setWindowIcon(QIcon(self.get_svg_icon(CAFE_LOGO_SVG)))
         elif active_console == "CTR":
-            theme_pref = self.config.get("theme", "auto")
-            is_dark = theme_pref in ["dark", "oled"] or (theme_pref == "auto" and getattr(self, "get_effective_is_dark", lambda: False)())
             self.setWindowIcon(QIcon(self.get_svg_icon(CTR_LOGO_WHITE_SVG if is_dark else CTR_LOGO_BLACK_SVG)))
         else:
             self.setWindowIcon(QIcon(self.get_svg_icon(TCD_MAIN_LOGO)))
@@ -195,7 +206,13 @@ class UiInteractionsMixin:
             if val == 0: svg = VOL_MUTE_SVG
             elif val < 50: svg = VOL_LOW_SVG
             else: svg = VOL_HIGH_SVG
-            pixmap = self.get_svg_icon(svg).scaled(20, 20, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            
+            cache_key = (svg, is_dark, 20, 20)
+            if cache_key in _VOL_CACHE:
+                pixmap = _VOL_CACHE[cache_key]
+            else:
+                pixmap = self.get_svg_icon(svg).scaled(20, 20, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                _VOL_CACHE[cache_key] = pixmap
             self.lbl_welcome_vol_icon.setPixmap(pixmap)
             
         if hasattr(self, "btn_tab_restart"):
@@ -203,8 +220,6 @@ class UiInteractionsMixin:
             self.btn_tab_restart.setIcon(QIcon(pm_restart))
             
         if hasattr(self, "btn_welcome_ctr"):
-            theme_pref = self.config.get("theme", "auto")
-            is_dark = theme_pref in ["dark", "oled"] or (theme_pref == "auto" and getattr(self, "get_effective_is_dark", lambda: False)())
             ctr_svg = CTR_LOGO_WHITE_SVG if is_dark else CTR_LOGO_BLACK_SVG
             self.btn_welcome_ctr.setIcon(QIcon(self.get_svg_icon(ctr_svg)))
 
@@ -213,16 +228,29 @@ class UiInteractionsMixin:
             theme_pref = self.config.get("theme", "auto")
             is_dark = theme_pref in ["dark", "oled"] or (theme_pref == "auto" and getattr(self, "get_effective_is_dark", lambda: False)())
             ctr_svg = CTR_LOGO_WHITE_SVG if is_dark else CTR_LOGO_CLEAN_SVG
+            self.console_selector.blockSignals(True)
             self.console_selector.setItemIcon(0, QIcon(self.get_svg_icon(NX_LOGO_SVG)))
             self.console_selector.setItemIcon(1, QIcon(self.get_svg_icon(ctr_svg)))
             self.console_selector.setItemIcon(2, QIcon(self.get_svg_icon(CAFE_LOGO_SVG)))
-            self.console_selector.setIconSize(QSize(18, 18))
+            self.console_selector.blockSignals(False)
 
     def _update_vol_icon(self, value):
+        if not hasattr(self, "lbl_vol_icon"):
+            return
         if value == 0: svg = VOL_MUTE_SVG
         elif value < 50: svg = VOL_LOW_SVG
         else: svg = VOL_HIGH_SVG
-        pixmap = self.get_svg_icon(svg).scaled(18, 18, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        
+        theme_pref = self.config.get("theme", "auto")
+        is_dark = theme_pref in ["dark", "oled"] or (theme_pref == "auto" and getattr(self, "get_effective_is_dark", lambda: False)())
+        
+        cache_key = (svg, is_dark, 18, 18)
+        if cache_key in _VOL_CACHE:
+            pixmap = _VOL_CACHE[cache_key]
+        else:
+            pixmap = self.get_svg_icon(svg).scaled(18, 18, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            _VOL_CACHE[cache_key] = pixmap
+            
         self.lbl_vol_icon.setPixmap(pixmap)
 
     def on_volume_changed(self, value):
@@ -244,13 +272,23 @@ class UiInteractionsMixin:
                 self.audio.play_test_sound()
 
     def finish_welcome_setup(self, console_index):
-        adv = self.chk_welcome_adv.isChecked()
-        logs = self.chk_welcome_logs.isChecked()
+        if getattr(self, "_is_finishing_welcome", False):
+            return
+        self._is_finishing_welcome = True
+
+        console_names = ["NX", "CTR", "CAFE"]
+        if not (0 <= console_index < len(console_names)):
+            self._is_finishing_welcome = False
+            return
+        chosen_console = console_names[console_index]
+
+        adv = self.chk_welcome_adv.isChecked() if hasattr(self, "chk_welcome_adv") else False
+        logs = self.chk_welcome_logs.isChecked() if hasattr(self, "chk_welcome_logs") else False
         
         self.config["advanced_mode"] = adv
         self.config["advanced_logs"] = logs
         self.config["first_launch"] = False
-        save_config(self.config)
+        self.config["console_mode"] = chosen_console
         
         if hasattr(self, "chk_adv_mode"): 
             self.chk_adv_mode.blockSignals(True)
@@ -260,48 +298,152 @@ class UiInteractionsMixin:
             self.chk_adv_logs.blockSignals(True)
             self.chk_adv_logs.setChecked(logs)
             self.chk_adv_logs.blockSignals(False)
+
+        welcome_buttons = [
+            getattr(self, "btn_welcome_nx", None),
+            getattr(self, "btn_welcome_ctr", None),
+            getattr(self, "btn_welcome_cafe", None)
+        ]
+        btn_map = {0: getattr(self, "btn_welcome_nx", None),
+                   1: getattr(self, "btn_welcome_ctr", None),
+                   2: getattr(self, "btn_welcome_cafe", None)}
+        selected_btn = btn_map.get(console_index)
+
+        for btn in welcome_buttons:
+            if btn:
+                btn.setEnabled(False)
+
+        if hasattr(self, "audio"):
+            self.audio.stop_all()
+            self.audio.play_console_click(chosen_console)
+
+        for btn in welcome_buttons:
+            if btn and btn != selected_btn:
+                op = QGraphicsOpacityEffect(btn)
+                btn.setGraphicsEffect(op)
+                anim = QPropertyAnimation(op, b"opacity", self)
+                anim.setDuration(120)
+                anim.setStartValue(1.0)
+                anim.setEndValue(0.15)
+                anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+                anim.start()
+
+        theme_pref = self.config.get("theme", "auto")
+        bg_color = "#F8F9FA"
+        if theme_pref == "oled":
+            bg_color = "#000000"
+        elif theme_pref == "dark" or (theme_pref == "auto" and getattr(self, "get_effective_is_dark", lambda: False)()):
+            bg_color = "#3C3C44"
+
+        overlay = QWidget(self.centralWidget())
+        overlay.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        overlay.setStyleSheet(f"background-color: {bg_color};")
+        overlay.setGeometry(self.centralWidget().rect())
+        overlay_opacity = QGraphicsOpacityEffect(overlay)
+        overlay.setGraphicsEffect(overlay_opacity)
+        overlay_opacity.setOpacity(0.0)
+        overlay.show()
+
+        anim_in = QPropertyAnimation(overlay_opacity, b"opacity", self)
+        anim_in.setDuration(150)
+        anim_in.setStartValue(0.0)
+        anim_in.setEndValue(1.0)
+        anim_in.setEasingCurve(QEasingCurve.Type.InOutQuad)
+
+        def on_fade_in_complete():
+            self.current_console = chosen_console
             
-        console_names = ["NX", "CTR", "CAFE"]
-        chosen_console = console_names[console_index]
-        self.audio.stop_all()
-        self.audio.play_console_click(chosen_console)
-        
-        self.welcome_fade = QPropertyAnimation(self, b"windowOpacity")
-        self.welcome_fade.setDuration(200)
-        self.welcome_fade.setStartValue(1.0)
-        self.welcome_fade.setEndValue(0.0)
-        self.welcome_fade.setEasingCurve(QEasingCurve.Type.InOutQuad)
-        
-        def on_fade_out_finished():
-            self.header_widget.setVisible(True)
-            self.nav_wrapper.setVisible(False if console_index == 3 else True)
-            self.bottom_widget.setVisible(True)
-            self.console_selector.setCurrentIndex(console_index)
-            
-            self.welcome_fade_in = QPropertyAnimation(self, b"windowOpacity")
-            self.welcome_fade_in.setDuration(300)
-            self.welcome_fade_in.setStartValue(0.0)
-            self.welcome_fade_in.setEndValue(1.0)
-            self.welcome_fade_in.setEasingCurve(QEasingCurve.Type.InOutQuad)
-            self.welcome_fade_in.start()
-            
-        self.welcome_fade.finished.connect(on_fade_out_finished)
-        self.welcome_fade.start()
+            if hasattr(self, "header_widget"):
+                self.header_widget.setVisible(True)
+            if hasattr(self, "nav_wrapper"):
+                self.nav_wrapper.setVisible(True)
+            if hasattr(self, "bottom_widget"):
+                self.bottom_widget.setVisible(True)
+
+            if hasattr(self, "console_selector"):
+                self.console_selector.blockSignals(True)
+                self.console_selector.setCurrentIndex(console_index)
+                self.console_selector.blockSignals(False)
+
+            self.sync_nav_buttons(0)
+
+            if hasattr(self, "input_output"):
+                self.input_output.blockSignals(True)
+                new_out = self.config.get(f"output_dir_{chosen_console.lower()}", "")
+                self.input_output.setText(new_out)
+                self.config["output_dir"] = new_out
+                self.input_output.blockSignals(False)
+
+            save_config(self.config)
+
+            self.tabs.setCurrentIndex(0)
+            self.clear_console_output()
+
+            if hasattr(self, "apply_visual_settings"): 
+                self.apply_visual_settings()
+            if hasattr(self, "apply_console_theme_colors"): 
+                self.apply_console_theme_colors()
+            if hasattr(self, "refresh_dynamic_icons"): 
+                self.refresh_dynamic_icons()
+            if hasattr(self, "retranslate_ui"): 
+                self.retranslate_ui()
+            if hasattr(self, "update_dynamic_ui"): 
+                self.update_dynamic_ui()
+            if hasattr(self, "update_manual_input_context"): 
+                self.update_manual_input_context()
+            if hasattr(self, "_update_settings_ui"): 
+                self._update_settings_ui()
+
+            if hasattr(self, "audio"):
+                self.audio.play_boot(chosen_console)
+
+            anim_out = QPropertyAnimation(overlay_opacity, b"opacity", self)
+            anim_out.setDuration(160)
+            anim_out.setStartValue(1.0)
+            anim_out.setEndValue(0.0)
+            anim_out.setEasingCurve(QEasingCurve.Type.OutQuad)
+
+            def on_fade_out_complete():
+                overlay.deleteLater()
+                self._is_finishing_welcome = False
+                if hasattr(self, "console_selector"):
+                    self.console_selector.setEnabled(True)
+                if hasattr(self, "btn_tab_dl"):
+                    self.btn_tab_dl.setEnabled(True)
+                if hasattr(self, "btn_tab_cfg"):
+                    self.btn_tab_cfg.setEnabled(True)
+                if hasattr(self, "btn_tab_credits"):
+                    self.btn_tab_credits.setEnabled(True)
+
+            anim_out.finished.connect(on_fade_out_complete)
+            anim_out.start()
+
+        anim_in.finished.connect(on_fade_in_complete)
+        anim_in.start()
 
     def update_color_button(self):
         if not hasattr(self, "btn_color"): 
             return
-        color = self.config.get("accent_color", "").strip()
-        default_colors = ["#c6a1fa", "#bc181a", "#4ebcff", ""]
-        if color.lower() in default_colors or not color:
-            self.btn_color.setText(self.T("btn_color_auto"))
+        
+        raw_color = str(getattr(self, "pending_color", self.config.get("accent_color", ""))).strip().lower()
+        default_colors = ["#c6a1fa", "#bc181a", "#4ebcff", "#7e57c2", "#c4a1ff", "#e60012", "#009ac7", "auto", ""]
+        
+        if not raw_color or raw_color in default_colors:
+            text_auto = self.T("btn_color_auto") if hasattr(self, "T") else "Auto"
+            if text_auto == "btn_color_auto":
+                text_auto = "Auto"
+            self.btn_color.setText(text_auto)
             self.btn_color.setStyleSheet("")
         else:
-            self.btn_color.setText(color.upper())
-            self.btn_color.setStyleSheet(f"background-color: {color}; color: white; font-weight: bold;")
+            display_hex = raw_color.upper()
+            c = QColor(display_hex)
+            luma = (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()) / 255 if c.isValid() else 0
+            text_color = "#000000" if luma > 0.5 else "#FFFFFF"
+            self.btn_color.setText(display_hex)
+            self.btn_color.setStyleSheet(f"background-color: {display_hex}; color: {text_color}; font-weight: bold; border: 1px solid #CED4DA; border-radius: 6px; padding: 6px 16px;")
 
     def _step_spinner(self):
-        if hasattr(self, "lbl_dl_mode"):
+        if hasattr(self, "lbl_dl_mode") and hasattr(self, "spinner_frames") and self.spinner_frames:
             frame = self.spinner_frames[self.spinner_idx % len(self.spinner_frames)]
             self.lbl_dl_mode.setText(f" {frame} ")
             self.spinner_idx += 1
@@ -312,8 +454,8 @@ class UiInteractionsMixin:
             elif self.radio_slc.isChecked(): parts = ["SLC"]
             else: parts = ["MLC", "SLC"]
             
-            if self.radio_usa.isChecked(): reg = "USA"
-            elif self.radio_jpn.isChecked(): reg = "JPN"
+            if hasattr(self, "radio_usa") and self.radio_usa.isChecked(): reg = "USA"
+            elif hasattr(self, "radio_jpn") and self.radio_jpn.isChecked(): reg = "JPN"
             else: reg = "EUR"
             
             self.config["cafe_partitions"] = parts
@@ -359,26 +501,29 @@ class UiInteractionsMixin:
             msg_box.exec()
             
             if msg_box.clickedButton() == btn_no:
-                self.chk_build_nsp.blockSignals(True)
-                self.chk_build_nsp.setChecked(False)
-                self.chk_build_nsp.blockSignals(False)
+                if hasattr(self, "chk_build_nsp"):
+                    self.chk_build_nsp.blockSignals(True)
+                    self.chk_build_nsp.setChecked(False)
+                    self.chk_build_nsp.blockSignals(False)
                 if hasattr(self, "config"):
                     self.config["build_nsp"] = False
                 return
                 
         if hasattr(self, "config"):
             self.config["build_nsp"] = checked
+        self.trigger_auto_save()
 
     def update_dynamic_ui(self):
-        is_nx = self.current_console == "NX"
-        is_ctr = self.current_console == "CTR"
-        is_cafe = self.current_console == "CAFE"
-        is_welcome = self.current_console == "WELCOME"
-        is_adv = False
-        
-        if hasattr(self, "chk_adv_mode"):
-            is_adv = self.chk_adv_mode.isChecked()
+        is_nx = (self.current_console == "NX")
+        is_ctr = (self.current_console == "CTR")
+        is_cafe = (self.current_console == "CAFE")
+        is_welcome = (self.current_console == "WELCOME")
+        is_adv = self.chk_adv_mode.isChecked() if hasattr(self, "chk_adv_mode") else False
             
+        if hasattr(self, "header_widget"):
+            self.header_widget.setVisible(not is_welcome)
+        if hasattr(self, "nav_wrapper"):
+            self.nav_wrapper.setVisible(not is_welcome)
         if hasattr(self, "btn_tab_credits"):
             self.btn_tab_credits.setVisible(not is_welcome)
         if hasattr(self, "volume_slider") and self.volume_slider.parentWidget():
@@ -388,15 +533,10 @@ class UiInteractionsMixin:
             self.chk_unlimited_console.setVisible(is_adv and not is_welcome)
             
         if hasattr(self, "radio_latest") and hasattr(self, "radio_manual"):
-            if is_cafe or is_ctr:
+            if is_cafe or is_ctr or is_nx:
                 self.radio_latest.setVisible(True)
                 self.radio_manual.setVisible(is_adv)
                 if not is_adv and self.radio_manual.isChecked(): 
-                    self.radio_latest.setChecked(True)
-            elif is_nx:
-                self.radio_latest.setVisible(True)
-                self.radio_manual.setVisible(is_adv)
-                if not is_adv and self.radio_manual.isChecked():
                     self.radio_latest.setChecked(True)
             else:
                 self.radio_latest.setVisible(False)
@@ -404,15 +544,22 @@ class UiInteractionsMixin:
                 
             is_manual = self.radio_manual.isChecked()
             
-            if is_nx and is_manual:
-                self.input_manual.setVisible(True)
-                if hasattr(self, "lbl_manual_hint"): self.lbl_manual_hint.setVisible(False)
-            elif (is_cafe or is_ctr) and is_manual:
-                self.input_manual.setVisible(True)
-                if hasattr(self, "lbl_manual_hint"): self.lbl_manual_hint.setVisible(False)
+            if hasattr(self, "input_manual"):
+                self.input_manual.setVisible((is_nx or is_cafe or is_ctr) and is_manual)
+            if hasattr(self, "lbl_manual_hint"):
+                self.lbl_manual_hint.setVisible(False)
+
+        if hasattr(self, "radio_list"):
+            show_list = bool(is_nx and is_adv)
+            self.radio_list.setVisible(show_list)
+            if not show_list:
+                if hasattr(self, "list_input_container"):
+                    self.list_input_container.setVisible(False)
+                if self.radio_list.isChecked():
+                    self.radio_latest.setChecked(True)
             else:
-                self.input_manual.setVisible(False)
-                if hasattr(self, "lbl_manual_hint"): self.lbl_manual_hint.setVisible(False)
+                if hasattr(self, "list_input_container"):
+                    self.list_input_container.setVisible(self.radio_list.isChecked())
                 
         if hasattr(self, "page_target_cafe"):
             self.page_target_cafe.setVisible(is_cafe)
@@ -426,9 +573,7 @@ class UiInteractionsMixin:
             
         if hasattr(self, "page_target_ctr"):
             self.page_target_ctr.setVisible(is_ctr)
-            show_ctr_reg = is_ctr 
-            
-            if hasattr(self, "ctr_reg_container"): self.ctr_reg_container.setVisible(show_ctr_reg)
+            if hasattr(self, "ctr_reg_container"): self.ctr_reg_container.setVisible(is_ctr)
             
         nx_settings = ["hactool", "keys", "prodinfo", "cert"]
         for setting in nx_settings:
@@ -470,6 +615,7 @@ class UiInteractionsMixin:
         self.console_selector.setEnabled(not locked)
         
         if hasattr(self, "radio_latest"): self.radio_latest.setEnabled(not locked)
+        if hasattr(self, "radio_list"): self.radio_list.setEnabled(not locked)
         if hasattr(self, "radio_manual"): self.radio_manual.setEnabled(not locked)
         if hasattr(self, "input_manual"): self.input_manual.setEnabled(not locked)
         if hasattr(self, "page_target_cafe"): self.page_target_cafe.setEnabled(not locked)
@@ -485,17 +631,29 @@ class UiInteractionsMixin:
         if hasattr(self, "console"): self.console.clear()
         if hasattr(self, "progress_bar"): self.progress_bar.setValue(0)
         if hasattr(self, "lbl_progress_pct"): self.lbl_progress_pct.setText("0%")
+        if hasattr(self, "_last_rendered_pct"): self._last_rendered_pct = 0
         if hasattr(self, "spinner_timer"): self.spinner_timer.stop()
         if hasattr(self, "symbol_reset_timer"): self.symbol_reset_timer.stop()
-        self.update_dl_mode_label()
+        if hasattr(self, "update_dl_mode_label"):
+            self.update_dl_mode_label()
 
     def switch_tab_animated(self, index):
         if self.tabs.currentIndex() == index: 
             return
+        if getattr(self, "_is_switching_tab", False):
+            return
+        self._is_switching_tab = True
             
         self.btn_tab_dl.setEnabled(False)
         self.btn_tab_cfg.setEnabled(False)
         self.btn_tab_credits.setEnabled(False)
+        
+        if hasattr(self, "fade_overlay") and self.fade_overlay:
+            try:
+                self.fade_overlay.deleteLater()
+            except Exception:
+                pass
+            self.fade_overlay = None
         
         self.fade_overlay = QWidget(self.tabs)
         self.fade_overlay.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -513,23 +671,26 @@ class UiInteractionsMixin:
         self.fade_overlay.show()
         
         self.anim_fade_in = QPropertyAnimation(self.overlay_opacity, b"opacity")
-        self.anim_fade_in.setDuration(120)
+        self.anim_fade_in.setDuration(50)
         self.anim_fade_in.setStartValue(0.0)
         self.anim_fade_in.setEndValue(1.0)
-        self.anim_fade_in.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        self.anim_fade_in.setEasingCurve(QEasingCurve.Type.OutQuad)
         
         def on_fade_in_finished():
             self.tabs.setCurrentIndex(index)
             self.sync_nav_buttons(index)
             
             self.anim_fade_out = QPropertyAnimation(self.overlay_opacity, b"opacity")
-            self.anim_fade_out.setDuration(120)
+            self.anim_fade_out.setDuration(60)
             self.anim_fade_out.setStartValue(1.0)
             self.anim_fade_out.setEndValue(0.0)
-            self.anim_fade_out.setEasingCurve(QEasingCurve.Type.InOutQuad)
+            self.anim_fade_out.setEasingCurve(QEasingCurve.Type.OutQuad)
             
             def on_fade_out_finished():
-                self.fade_overlay.deleteLater()
+                if hasattr(self, "fade_overlay") and self.fade_overlay:
+                    self.fade_overlay.deleteLater()
+                    self.fade_overlay = None
+                self._is_switching_tab = False
                 if not (getattr(self, "worker", None) is not None and self.worker.isRunning()):
                     self.btn_tab_dl.setEnabled(True)
                     self.btn_tab_cfg.setEnabled(True)
@@ -567,10 +728,59 @@ class UiInteractionsMixin:
             self.execute_restart()
 
     def execute_restart(self, *args):
+        self._is_restarting = True
+        
+        if hasattr(self, "save_timer") and self.save_timer.isActive():
+            self.save_timer.stop()
+        if hasattr(self, "rainbow_timer") and self.rainbow_timer.isActive():
+            self.rainbow_timer.stop()
+        if hasattr(self, "_sigint_timer") and self._sigint_timer.isActive():
+            self._sigint_timer.stop()
+        if hasattr(self, "updater_spinner_timer") and self.updater_spinner_timer.isActive():
+            self.updater_spinner_timer.stop()
+
+        if hasattr(self, "audio"):
+            try:
+                if hasattr(self.audio, "cleanup"):
+                    self.audio.cleanup()
+                elif hasattr(self.audio, "stop_all"):
+                    self.audio.stop_all()
+            except Exception:
+                pass
+
+        try:
+            if hasattr(self, "commit_save_to_disk"):
+                self.commit_save_to_disk()
+            elif hasattr(self, "config"):
+                save_config(self.config)
+        except Exception:
+            pass
+
         self.perform_security_cleanup()
-        subprocess.Popen([sys.executable] + sys.argv)
-        QApplication.quit()
-        sys.exit(0)
+
+        if hasattr(self, "app_lock") and self.app_lock.isLocked():
+            try:
+                self.app_lock.unlock()
+            except Exception:
+                pass
+
+        script_path = os.path.abspath(sys.argv[0])
+        args = [sys.executable, script_path] + sys.argv[1:]
+        kwargs = {"cwd": os.path.dirname(script_path) or os.getcwd()}
+        if sys.platform == "win32":
+            kwargs["creationflags"] = 0x00000008 | 0x00000200
+        else:
+            kwargs["start_new_session"] = True
+
+        try:
+            subprocess.Popen(args, **kwargs)
+        except Exception as e:
+            print(f"[RESTART ERROR] {e}")
+
+        self.close()
+        app = QApplication.instance()
+        if app:
+            app.quit()
 
     def show_corruption_warning(self, *args):
         msg_box = QMessageBox(self)
@@ -594,30 +804,59 @@ class UiInteractionsMixin:
                         show_full_eula = False
                     if data.get("dont_show_again") is True: 
                         dont_show_again = True
-            except: 
-                pass
-                
-        if dont_show_again: 
-            return
-            
-        dialog = EulaDialog(self, show_full_eula, getattr(self, "T", lambda x: x))
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            try:
-                os.makedirs(APPDATA_DIR, exist_ok=True)
-                with open(EULA_FILE, "w", encoding="utf-8") as f:
-                    json.dump({"accepted": True, "dont_show_again": dialog.dont_show_again, "date": datetime.datetime.now().isoformat()}, f, indent=4)
             except Exception: 
                 pass
-        else:
-            sys.exit(0)
+                
+        if dont_show_again:
+            if self.current_console != "WELCOME":
+                QTimer.singleShot(200, lambda: self.start_update_check(auto=True))
+            return
+            
+        self._eula_active = True
+        try:
+            dialog = EulaDialog(self, show_full_eula, getattr(self, "T", lambda x: x))
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                try:
+                    os.makedirs(str(APPDATA_DIR), exist_ok=True)
+                    with open(EULA_FILE, "w", encoding="utf-8") as f:
+                        json.dump({"accepted": True, "dont_show_again": dialog.dont_show_again, "date": datetime.datetime.now().isoformat()}, f, indent=4)
+                except Exception: 
+                    pass
+            else:
+                sys.exit(0)
+        finally:
+            self._eula_active = False
+
+        if self.current_console != "WELCOME":
+            QTimer.singleShot(200, lambda: self.start_update_check(auto=True))
 
     def switch_console_mode(self, index):
         if index == 3: return
+        if getattr(self, "_is_switching_console", False): return
+        
+        modes = ["NX", "CTR", "CAFE", "WELCOME"]
+        if not (0 <= index < len(modes)):
+            return
+        new_mode = modes[index]
+        if new_mode == getattr(self, "current_console", None):
+            return
+            
+        self._is_switching_console = True
+        self.current_console = new_mode
+        self.config["console_mode"] = new_mode
         
         self.console_selector.setEnabled(False)
-        self.audio.fade_out_fast(duration=120)
+        if hasattr(self, "audio"):
+            self.audio.fade_out_fast(duration=50)
         self.sync_nav_buttons(0)
         
+        if hasattr(self, "console_fade_overlay") and self.console_fade_overlay:
+            try:
+                self.console_fade_overlay.deleteLater()
+            except Exception:
+                pass
+            self.console_fade_overlay = None
+            
         self.console_fade_overlay = QWidget(self.tabs)
         self.console_fade_overlay.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.console_fade_overlay.resize(self.tabs.size())
@@ -634,22 +873,18 @@ class UiInteractionsMixin:
         self.console_fade_overlay.show()
         
         self.anim_console_fade_in = QPropertyAnimation(self.console_overlay_opacity, b"opacity")
-        self.anim_console_fade_in.setDuration(120)
+        self.anim_console_fade_in.setDuration(50)
         self.anim_console_fade_in.setStartValue(0.0)
         self.anim_console_fade_in.setEndValue(1.0)
-        self.anim_console_fade_in.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        self.anim_console_fade_in.setEasingCurve(QEasingCurve.Type.OutQuad)
         
         def d_on_fade_in_finished():
             if hasattr(self, "input_output"): 
                 self.input_output.blockSignals(True)
                 
             self.clear_console_output()
-            modes = ["NX", "CTR", "CAFE", "WELCOME"]
-            new_mode = modes[index]
-            
-            self.audio.play_boot(new_mode)
-            self.current_console = new_mode
-            self.config["console_mode"] = new_mode
+            if hasattr(self, "audio"):
+                self.audio.play_boot(new_mode)
             
             if hasattr(self, "get_current_accent_color"): 
                 self.get_current_accent_color()
@@ -660,11 +895,8 @@ class UiInteractionsMixin:
                 self.config["output_dir"] = new_out
                 self.input_output.blockSignals(False)
                 
-            save_config(self.config)
-            
             if hasattr(self, "apply_visual_settings"): self.apply_visual_settings()
-            self.apply_console_theme_colors()
-            self.refresh_dynamic_icons()
+            if hasattr(self, "apply_console_theme_colors"): self.apply_console_theme_colors()
             
             if hasattr(self, "retranslate_ui"):
                 self.retranslate_ui()
@@ -683,18 +915,25 @@ class UiInteractionsMixin:
             self.tabs.setCurrentIndex(0)
             
             self.anim_console_fade_out = QPropertyAnimation(self.console_overlay_opacity, b"opacity")
-            self.anim_console_fade_out.setDuration(120)
+            self.anim_console_fade_out.setDuration(60)
             self.anim_console_fade_out.setStartValue(1.0)
             self.anim_console_fade_out.setEndValue(0.0)
-            self.anim_console_fade_out.setEasingCurve(QEasingCurve.Type.InOutQuad)
+            self.anim_console_fade_out.setEasingCurve(QEasingCurve.Type.OutQuad)
             
             def d_on_fade_out_finished():
-                self.console_fade_overlay.deleteLater()
+                if hasattr(self, "console_fade_overlay") and self.console_fade_overlay:
+                    self.console_fade_overlay.deleteLater()
+                    self.console_fade_overlay = None
+                self._is_switching_console = False
                 if not (getattr(self, "worker", None) is not None and self.worker.isRunning()):
                     self.console_selector.setEnabled(True)
                     self.btn_tab_dl.setEnabled(True)
                     self.btn_tab_cfg.setEnabled(True)
                     self.btn_tab_credits.setEnabled(True)
+                if hasattr(self, "trigger_auto_save"):
+                    self.trigger_auto_save()
+                else:
+                    save_config(self.config)
                     
             self.anim_console_fade_out.finished.connect(d_on_fade_out_finished)
             self.anim_console_fade_out.start()

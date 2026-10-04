@@ -2,13 +2,17 @@ import os
 import sys
 import json
 import re
+import copy
 from pathlib import Path
 from typing import Tuple, Dict, Any
 
 APP_NAME = "TriCoreDownloader"
-APP_VERSION = "0.9.0.5"
+APP_VERSION = "1.0.0"
 IS_STORE_PYTHON = False
 _HARD_RESET_LOCK = False
+
+RE_DIGITS = re.compile(r'\d+')
+RE_HEX32 = re.compile(r"^[A-Fa-f0-9]{32}$")
 
 if os.name == "nt" and sys.executable and ("WindowsApps" in sys.executable or "PythonSoftwareFoundation" in sys.executable):
     IS_STORE_PYTHON = True
@@ -28,15 +32,100 @@ print(f"[CONFIG] Base directory set to: {APPDATA_DIR}")
 CONFIG_FILE = APPDATA_DIR / "config.json"
 EULA_FILE = APPDATA_DIR / "terms.json"
 
+ORDERED_KEYS = (
+    "version", "console_mode", "hactool", "prod_keys", "prodinfo", "output_dir",
+    "output_dir_nx", "output_dir_cafe", "output_dir_ctr", "cert_pem",
+    "boot9_path", "decrypt_cia", "ctr_model", "ctr_region",
+    "otp_path", "cafe_extract", "cafe_partitions", "lang", "theme",
+    "accent_color", "rainbow_mode", "rainbow_speed", "custom_colors",
+    "allow_resize", "advanced_mode", "advanced_logs", "exclude_exfat",
+    "auto_save", "ask_open_folder_nx", "auto_open_folder_nx",
+    "ask_open_folder_cafe", "auto_open_folder_cafe", "ask_open_folder_ctr",
+    "auto_open_folder_ctr", "hide_privacy_warning", "redact_privacy_info",
+    "use_aria2c", "aria2c_path", "openssl_path", "cafe_cemu_layout",
+    "rainbow_targets", "cafe_region", "otp_key"
+)
+
+DEFAULT_CONFIG: Dict[str, Any] = {
+    "version": APP_VERSION,
+    "console_mode": "NX",
+    "hactool": "",
+    "prod_keys": "",
+    "prodinfo": "",
+    "output_dir": "",
+    "output_dir_nx": "",
+    "output_dir_cafe": "",
+    "output_dir_ctr": "",
+    "cert_pem": "",
+    "otp_path": "",
+    "cafe_extract": False,
+    "cafe_partitions": ["MLC"],
+    "lang": None,
+    "theme": "auto",
+    "accent_color": "",
+    "rainbow_mode": False,
+    "rainbow_speed": 2,
+    "custom_colors": [],
+    "allow_resize": False,
+    "advanced_mode": False,
+    "advanced_logs": False,
+    "exclude_exfat": False,
+    "auto_save": False,
+    "ask_open_folder_nx": True,
+    "auto_open_folder_nx": False,
+    "ask_open_folder_cafe": True,
+    "auto_open_folder_cafe": False,
+    "ask_open_folder_ctr": True,
+    "auto_open_folder_ctr": False,
+    "hide_privacy_warning": False,
+    "redact_privacy_info": False,
+    "use_aria2c": False,
+    "aria2c_path": "",
+    "openssl_path": "",
+    "cafe_cemu_layout": False,
+    "rainbow_targets": {
+        "title": True,
+        "tabs": True,
+        "buttons": True,
+        "progress": True,
+        "indicators": True,
+        "text": False,
+        "inputs": False,
+        "console": False
+    },
+    "cafe_region": "EUR",
+    "otp_key": "",
+    "boot9_path": "", 
+    "decrypt_cia": False,
+    "ctr_model": "OLD",
+    "ctr_region": "EUR"
+}
+
+FILE_KEYS_TO_VERIFY = (
+    "hactool", "prod_keys", "prodinfo", "cert_pem", 
+    "aria2c_path", "openssl_path", "boot9_path"
+)
+
 def _T(key: str, lang: str = "en") -> str:
     try:
         from .Languages.locales import STRINGS
         return STRINGS.get(lang, STRINGS.get("en", {})).get(key, key)
-    except ImportError:
+    except Exception:
         return key
 
+def parse_version(v_str):
+    try:
+        parts = RE_DIGITS.findall(str(v_str))
+        if not parts:
+            return (0, 0, 0)
+        t = [int(p) for p in parts[:3]]
+        while len(t) < 3:
+            t.append(0)
+        return tuple(t)
+    except Exception:
+        return (0, 0, 0)
+
 def save_config(config_data: Dict[str, Any]) -> None:
-    # Atomic execution check: if reset lock is engaged, reject disk access immediately
     if _HARD_RESET_LOCK:
         print("[CONFIG] Write operation aborted: Hard reset lifecycle lock engaged.")
         return
@@ -45,21 +134,7 @@ def save_config(config_data: Dict[str, Any]) -> None:
     temp_file = CONFIG_FILE.with_suffix(".json.tmp")
     lang = config_data.get("lang", "en")
     
-    ordered_keys = [
-        "version", "console_mode", "hactool", "prod_keys", "prodinfo", "output_dir",
-        "output_dir_nx", "output_dir_cafe", "output_dir_ctr", "cert_pem",
-        "boot9_path", "decrypt_cia", "ctr_model", "ctr_region",
-        "otp_path", "cafe_extract", "cafe_partitions", "lang", "theme",
-        "accent_color", "rainbow_mode", "rainbow_speed", "custom_colors",
-        "allow_resize", "advanced_mode", "advanced_logs", "exclude_exfat",
-        "auto_save", "ask_open_folder_nx", "auto_open_folder_nx",
-        "ask_open_folder_cafe", "auto_open_folder_cafe", "ask_open_folder_ctr",
-        "auto_open_folder_ctr", "hide_privacy_warning", "redact_privacy_info",
-        "use_aria2c", "aria2c_path", "openssl_path", "cafe_cemu_layout",
-        "rainbow_targets", "cafe_region", "otp_key"
-    ]
-    
-    ordered_config = {k: config_data[k] for k in ordered_keys if k in config_data}
+    ordered_config = {k: config_data[k] for k in ORDERED_KEYS if k in config_data}
     for k, v in config_data.items():
         if k not in ordered_config and not k.startswith("_"):
             ordered_config[k] = v
@@ -81,61 +156,7 @@ def save_config(config_data: Dict[str, Any]) -> None:
                 pass
 
 def load_config() -> Tuple[Dict[str, Any], bool, bool]:
-    default_config = {
-        "version": APP_VERSION,
-        "console_mode": "NX",
-        "hactool": "",
-        "prod_keys": "",
-        "prodinfo": "",
-        "output_dir": "",
-        "output_dir_nx": "",
-        "output_dir_cafe": "",
-        "output_dir_ctr": "",
-        "cert_pem": "",
-        "otp_path": "",
-        "cafe_extract": False,
-        "cafe_partitions": ["MLC"],
-        "lang": None,
-        "theme": "auto",
-        "accent_color": "",
-        "rainbow_mode": False,
-        "rainbow_speed": 2,
-        "custom_colors": [],
-        "allow_resize": False,
-        "advanced_mode": False,
-        "advanced_logs": False,
-        "exclude_exfat": False,
-        "auto_save": False,
-        "ask_open_folder_nx": True,
-        "auto_open_folder_nx": False,
-        "ask_open_folder_cafe": True,
-        "auto_open_folder_cafe": False,
-        "ask_open_folder_ctr": True,
-        "auto_open_folder_ctr": False,
-        "hide_privacy_warning": False,
-        "redact_privacy_info": False,
-        "use_aria2c": False,
-        "aria2c_path": "",
-        "openssl_path": "",
-        "cafe_cemu_layout": False,
-        "rainbow_targets": {
-            "title": True,
-            "tabs": True,
-            "buttons": True,
-            "progress": True,
-            "indicators": True,
-            "text": False,
-            "inputs": False,
-            "console": False
-        },
-        "cafe_region": "EUR",
-        "otp_key": "",
-        "boot9_path": "", 
-        "decrypt_cia": False,
-        "ctr_model": "OLD",
-        "ctr_region": "EUR"
-    }
-    
+    default_config = copy.deepcopy(DEFAULT_CONFIG)
     is_corrupted = False
     tampered_rainbow = False
     
@@ -143,14 +164,14 @@ def load_config() -> Tuple[Dict[str, Any], bool, bool]:
         print(f"[CONFIG] Loading existing config file from {CONFIG_FILE}")
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                saved = json.loads(f.read())
+                saved = json.load(f)
                 
-                if not isinstance(saved, dict):
-                    raise ValueError("Root element is not a dictionary.")
+            if not isinstance(saved, dict):
+                raise ValueError("Root element is not a dictionary.")
                 
-            merged_config = default_config.copy()
+            merged_config = copy.deepcopy(DEFAULT_CONFIG)
             merged_config.update(saved)
-            force_rewrite = (len(saved) != len(merged_config)) or any(k not in saved for k in default_config)
+            force_rewrite = (len(saved) != len(merged_config)) or any(k not in saved for k in DEFAULT_CONFIG)
             
             saved_version = saved.get("version", "0.0.0")
             adv_logs = saved.get("advanced_logs", False)
@@ -158,16 +179,6 @@ def load_config() -> Tuple[Dict[str, Any], bool, bool]:
             if adv_logs:
                 print(f"[CONFIG DEBUG] Local APP_VERSION: {APP_VERSION}")
                 print(f"[CONFIG DEBUG] Saved Config Version: {saved_version}")
-
-            def parse_version(v_str):
-                try:
-                    parts = re.findall(r'\d+', str(v_str))
-                    if not parts: return (0, 0, 0)
-                    t = [int(p) for p in parts[:3]]
-                    while len(t) < 3: t.append(0)
-                    return tuple(t)
-                except Exception:
-                    return (0, 0, 0)
             
             if saved_version != "0.0.0" and saved_version != APP_VERSION:
                 curr_t = parse_version(APP_VERSION)
@@ -185,19 +196,20 @@ def load_config() -> Tuple[Dict[str, Any], bool, bool]:
                 merged_config["version"] = APP_VERSION
                 force_rewrite = True
 
-            if merged_config.get("console_mode") not in ["NX", "CTR", "CAFE", "WELCOME"]:
+            if merged_config.get("console_mode") not in ("NX", "CTR", "CAFE", "WELCOME"):
                 merged_config["console_mode"] = "NX"
                 force_rewrite = True
             
-            for file_key in ["hactool", "prod_keys", "prodinfo", "cert_pem", "aria2c_path", "openssl_path", "boot9_path"]:
+            for file_key in FILE_KEYS_TO_VERIFY:
                 val = merged_config.get(file_key, "")
-                if val and not Path(val).is_file():
+                if val and not os.path.isfile(val):
                     merged_config[file_key] = ""
                     force_rewrite = True
                     
             otp_val = merged_config.get("otp_path", "")
             if otp_val:
-                if not Path(otp_val).is_file() and not re.match(r"^[A-Fa-f0-9]{32}$", otp_val.strip()):
+                cleaned_otp = otp_val.strip()
+                if not os.path.isfile(otp_val) and not RE_HEX32.match(cleaned_otp):
                     merged_config["otp_path"] = ""
                     force_rewrite = True
             

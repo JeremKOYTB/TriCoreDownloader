@@ -1,10 +1,12 @@
 import os
+import sys
 import json
 import time
 import shutil
 import re
 import threading
 import traceback
+import concurrent.futures
 from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -12,13 +14,16 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from ..Languages.locales import STRINGS
 
 from .worker_ops import (
-    get_common_key, 
+    get_common_key,
     verify_common_key_online,
-    download_title_files, 
-    verify_title_integrity, 
+    download_title_files,
+    verify_title_integrity,
     process_title,
-    get_yls8_versions
+    get_yls8_versions,
+    create_optimized_session,
 )
+
+RE_LEGACY_FW = re.compile(r"^(\d+)\.")
 
 class CafeDownloaderWorker(QThread):
     log_signal = pyqtSignal(str)
@@ -34,21 +39,57 @@ class CafeDownloaderWorker(QThread):
         self.version = version
         self.config = config
         self._is_running = True
-        
+
         self._skip_choice = None
         self._always_choice = False
         self._skip_event = threading.Event()
         self._always_skip_404 = False
-        
+
+        self._prompt_lock = threading.Lock()
+        self._step_lock = threading.Lock()
+        self._data_lock = threading.Lock()
+
         self.lang = self.config.get("lang", "en")
-        self.region = self.version.upper() if self.version.upper() in ["EUR", "USA", "JPN"] else "EUR"
-        
-        base_dir = Path(__file__).resolve().parent.parent
-        self.titles_json_path = base_dir / "titles_cafe.json"
+        self.region = (
+            self.version.upper()
+            if self.version.upper() in ["EUR", "USA", "JPN"]
+            else "EUR"
+        )
+
+        self.titles_json_path = self.resolve_titles_json_path()
         self.region_dir = None
 
+    def resolve_titles_json_path(self) -> Path:
+        filename = "titles_cafe.json"
+        
+        if hasattr(sys, "_MEIPASS"):
+            meipass_path = Path(sys._MEIPASS) / filename
+            if meipass_path.is_file():
+                return meipass_path
+
+        cwd_path = Path.cwd() / filename
+        if cwd_path.is_file():
+            return cwd_path
+
+        if getattr(sys, "frozen", False):
+            exe_dir_path = Path(sys.executable).resolve().parent / filename
+            if exe_dir_path.is_file():
+                return exe_dir_path
+
+        module_local_path = Path(__file__).resolve().parent / filename
+        if module_local_path.is_file():
+            return module_local_path
+
+        module_base_path = Path(__file__).resolve().parent.parent / filename
+        if module_base_path.is_file():
+            return module_base_path
+
+        return module_base_path
+
     def receive_skip_choice(self, choice, always=False):
-        print(f"[CAFE WORKER] Received 404 skip choice from UI: {choice} (Always: {always})")
+        print(
+            f"[CAFE WORKER] Received 404 skip choice from UI: {choice} (Always: {always})"
+        )
         self._skip_choice = choice
         self._always_choice = always
         self._skip_event.set()
@@ -66,25 +107,32 @@ class CafeDownloaderWorker(QThread):
     def stop(self):
         print("[CAFE WORKER] Interruption signal received.")
         self._is_running = False
+        self._skip_event.set()
 
     def _generate_bar(self, current, total, length=20):
         percent = current / total if total > 0 else 1
         filled = int(length * percent)
-        bar = '█' * filled + '░' * (length - filled)
+        bar = "█" * filled + "░" * (length - filled)
         return f"[{bar}] {int(percent * 100):>3}%"
 
     def _cleanup_partial_files(self):
         try:
-            purged = False
             if self.region_dir and self.region_dir.exists():
-                time.sleep(0.5) 
-                shutil.rmtree(self.region_dir, ignore_errors=True)
-                purged = True
-                
-            if purged:
-                print(f"[CAFE WORKER] Cleaned up temporary directory: {self.region_dir}")
-                msg_purge = self.T("log_purge_interrupt").format(self.region)
-                self.log_signal.emit(msg_purge)
+                for _ in range(3):
+                    try:
+                        shutil.rmtree(self.region_dir, ignore_errors=True)
+                        if not self.region_dir.exists():
+                            break
+                    except Exception:
+                        pass
+                    time.sleep(0.1)
+
+                if not self.region_dir.exists():
+                    print(
+                        f"[CAFE WORKER] Cleaned up temporary directory: {self.region_dir}"
+                    )
+                    msg_purge = self.T("log_purge_interrupt").format(self.region)
+                    self.log_signal.emit(msg_purge)
         except Exception as e:
             print(f"[CAFE WORKER ERROR] Cleanup failed: {e}")
             self.log_signal.emit(self.T("log_purge_err").format(e))
@@ -93,7 +141,7 @@ class CafeDownloaderWorker(QThread):
         try:
             print("[CAFE WORKER] Execution thread started.")
             adv_logs = self.config.get("advanced_logs", False)
-            start_time = time.time()
+            start_time = time.monotonic()
 
             out_base_str = self.config.get("output_dir", "").strip()
             if not out_base_str:
@@ -105,10 +153,15 @@ class CafeDownloaderWorker(QThread):
             if self.region_dir.exists():
                 try:
                     shutil.rmtree(self.region_dir, ignore_errors=True)
+                    if self.region_dir.exists():
+                        time.sleep(0.1)
+                        shutil.rmtree(self.region_dir)
                     msg_pre_purge = self.T("log_pre_purge").format(self.region)
                     self.log_signal.emit(msg_pre_purge)
                 except Exception as e:
-                    raise RuntimeError(self.T("err_pre_purge").format(self.region, e))
+                    raise RuntimeError(
+                        self.T("err_pre_purge").format(self.region, e)
+                    )
 
             if not self.titles_json_path.exists():
                 raise FileNotFoundError(self.T("err_titles_json_missing"))
@@ -123,36 +176,44 @@ class CafeDownloaderWorker(QThread):
             otp_input = self.config.get("otp_path", "").strip()
             common_key = get_common_key(otp_input, self.T, self.debug_log)
             verify_common_key_online(common_key, self.T, self.debug_log)
-            
+
             raw_partitions = self.config.get("cafe_partitions", ["MLC", "SLC"])
-            title_types_list = [raw_partitions] if isinstance(raw_partitions, str) else raw_partitions
-            
+            title_types_list = (
+                [raw_partitions]
+                if isinstance(raw_partitions, str)
+                else (raw_partitions or ["MLC", "SLC"])
+            )
+
             will_extract = self.config.get("cafe_extract", False)
             phases_count = 3 if will_extract else 2
-            
+
             if adv_logs:
-                self.log_signal.emit(self.T("log_worker_config_ok").format(self.region))
-            
+                self.log_signal.emit(
+                    self.T("log_worker_config_ok").format(self.region)
+                )
+
             target_fw = self.config.get("target_firmware", "").strip()
             title_versions = {}
             is_legacy_fw = False
-            
+
             if target_fw:
-                match = re.match(r"^(\d+)\.", target_fw)
+                match = RE_LEGACY_FW.match(target_fw)
                 if match and int(match.group(1)) < 2:
                     is_legacy_fw = True
-                    
+
                 if is_legacy_fw:
                     msg_legacy = self.T("log_legacy_fw").format(target_fw)
                     self.log_signal.emit(f"[*] {msg_legacy}")
                 else:
                     msg_fetch = self.T("log_yls8_fetch").format(target_fw)
                     self.log_signal.emit(f"[*] {msg_fetch}")
-                    
+
                     try:
                         title_versions = get_yls8_versions(self.region, target_fw)
                     except ValueError:
-                        err_nf = self.T("err_yls8_not_found").format(target_fw, self.region)
+                        err_nf = self.T("err_yls8_not_found").format(
+                            target_fw, self.region
+                        )
                         raise RuntimeError(self.T("err_yls8_fail").format(err_nf))
                     except Exception as e:
                         raise RuntimeError(self.T("err_yls8_fail").format(str(e)))
@@ -165,8 +226,12 @@ class CafeDownloaderWorker(QThread):
                 titles_map = titles_data.get(title_type, {})
                 selected_region_titles = titles_map.get(self.region, [])
                 all_region_titles = titles_map.get("All", [])
-                all_tids = [tid for tid in (selected_region_titles + all_region_titles) if tid != "dummy"]
-                
+                all_tids = [
+                    tid
+                    for tid in (selected_region_titles + all_region_titles)
+                    if tid != "dummy"
+                ]
+
                 valid_tids = []
                 for tid in all_tids:
                     if target_fw:
@@ -179,10 +244,14 @@ class CafeDownloaderWorker(QThread):
                             else:
                                 fallback_msg = f"[*] Skipped {tid} (not found for {target_fw})"
                                 skip_str = self.T("log_title_skipped")
-                                self.log_signal.emit(skip_str.format(tid) if skip_str != "log_title_skipped" else fallback_msg)
+                                self.log_signal.emit(
+                                    skip_str.format(tid)
+                                    if skip_str != "log_title_skipped"
+                                    else fallback_msg
+                                )
                     else:
                         valid_tids.append(tid)
-                
+
                 tasks_per_partition[title_type] = valid_tids
                 global_total_steps += len(valid_tids) * phases_count
                 total_processed_tids += len(valid_tids)
@@ -194,171 +263,332 @@ class CafeDownloaderWorker(QThread):
                 return
 
             global_current_step = 0
-            
-            for title_type in title_types_list:
-                if not self._is_running: break
-                
-                all_tids = tasks_per_partition[title_type]
-                if not all_tids: continue
+            shared_session = create_optimized_session()
 
-                raw_dir = self.region_dir / title_type
-                total_tids = len(all_tids)
-                
-                msg_found = self.T("log_found_ready").format(total_tids, title_type)
-                self.log_signal.emit(f"\n{msg_found}")
+            cpu_count = os.cpu_count() or 4
+            dl_workers = min(4, cpu_count)
+            vr_workers = min(6, cpu_count)
+            ex_workers = min(4, cpu_count)
 
-                skipped_tids = set()
+            try:
+                for title_type in title_types_list:
+                    if not self._is_running:
+                        break
 
-                msg_dl_adv = self.T("log_phase1_adv").format(title_type).strip()
-                msg_dl_norm = self.T("log_phase1_norm").format(title_type).strip()
-
-                if adv_logs: self.log_signal.emit(msg_dl_adv)
-                else: self.log_signal.emit(f" {msg_dl_norm}   {self._generate_bar(0, total_tids)}")
-
-                for i, tid in enumerate(all_tids):
-                    if not self._is_running: break
-                    work_dir = raw_dir / tid
-                    
-                    if adv_logs:
-                        self.log_signal.emit(self.T("log_worker_dl_id_adv").format(tid))
-                    else:
-                        self.log_replace_signal.emit(f" {msg_dl_norm}   {self._generate_bar(i + 1, total_tids)}")
-                    
-                    target_ver = title_versions.get(tid.lower())
-                    
-                    try:
-                        if not download_title_files(tid, str(work_dir), self.T, self.is_running, self.debug_log, target_ver):
-                            if self._is_running: raise RuntimeError(self.T("err_dl_id").format(tid))
-                    except RuntimeError as e:
-                        if "404" in str(e):
-                            if self._always_skip_404:
-                                self.log_signal.emit(self.T("log_skip_404").format(tid))
-                                skipped_tids.add(tid)
-                                global_current_step += 1
-                                self.progress_signal.emit(global_current_step, global_total_steps)
-                                if not adv_logs:
-                                    self.log_signal.emit(f" {msg_dl_norm}   {self._generate_bar(i + 1, total_tids)}")
-                                continue
-
-                            self._skip_choice = None
-                            self._always_choice = False
-                            self._skip_event.clear()
-                            self.ask_skip_signal.emit(tid)
-                            
-                            while self._is_running and not self._skip_event.is_set():
-                                time.sleep(0.1)
-                                
-                            if self._always_choice:
-                                self._always_skip_404 = True
-
-                            if self._skip_choice:
-                                self.log_signal.emit(self.T("log_skip_404").format(tid))
-                                skipped_tids.add(tid)
-                                global_current_step += 1
-                                self.progress_signal.emit(global_current_step, global_total_steps)
-                                if not adv_logs:
-                                    self.log_signal.emit(f" {msg_dl_norm}   {self._generate_bar(i + 1, total_tids)}")
-                                continue
-                            else:
-                                self.log_signal.emit(self.T("log_abort_404"))
-                                raise RuntimeError(self.T("err_abort_404").format(tid))
-                        else:
-                            raise
-                    
-                    global_current_step += 1
-                    self.progress_signal.emit(global_current_step, global_total_steps)
-
-                if not adv_logs and self._is_running:
-                    self.log_replace_signal.emit(f" {msg_dl_norm} ✓ {self._generate_bar(total_tids, total_tids)}")
-
-                if not self._is_running: break
-
-                msg_vr_adv = self.T("log_phase2_adv").format(title_type).strip()
-                msg_vr_norm = self.T("log_phase2_norm").format(title_type).strip()
-
-                if adv_logs: self.log_signal.emit(msg_vr_adv)
-                else: self.log_signal.emit(f" {msg_vr_norm}   {self._generate_bar(0, total_tids)}")
-                    
-                for i, tid in enumerate(all_tids):
-                    if not self._is_running: break
-                    
-                    if tid in skipped_tids:
-                        global_current_step += 1
-                        self.progress_signal.emit(global_current_step, global_total_steps)
+                    all_tids = tasks_per_partition[title_type]
+                    if not all_tids:
                         continue
-                        
-                    work_dir = raw_dir / tid
-                    
+
+                    raw_dir = self.region_dir / title_type
+                    total_tids = len(all_tids)
+
+                    msg_found = self.T("log_found_ready").format(total_tids, title_type)
+                    self.log_signal.emit(f"\n{msg_found}")
+
+                    skipped_tids = set()
+
+                    msg_dl_adv = self.T("log_phase1_adv").format(title_type).strip()
+                    msg_dl_norm = self.T("log_phase1_norm").format(title_type).strip()
+
                     if adv_logs:
-                        self.log_signal.emit(self.T("log_worker_verify_id_adv").format(tid))
+                        self.log_signal.emit(msg_dl_adv)
                     else:
-                        self.log_replace_signal.emit(f" {msg_vr_norm}   {self._generate_bar(i + 1, total_tids)}")
-                    
-                    if not verify_title_integrity(tid, str(work_dir), common_key, self.T, self.is_running, self.debug_log):
-                        if self._is_running: raise RuntimeError(self.T("err_integ_id").format(tid))
-                    
-                    global_current_step += 1
-                    self.progress_signal.emit(global_current_step, global_total_steps)
+                        self.log_signal.emit(
+                            f" {msg_dl_norm}   {self._generate_bar(0, total_tids)}"
+                        )
 
-                if not adv_logs and self._is_running:
-                    self.log_replace_signal.emit(f" {msg_vr_norm} ✓ {self._generate_bar(total_tids, total_tids)}")
+                    completed_dl = 0
 
-                if not self._is_running: break
+                    def _download_task(tid):
+                        nonlocal completed_dl, global_current_step
+                        if not self._is_running:
+                            raise RuntimeError("STOPPED")
 
-                if not will_extract:
-                    msg_skip = self.T("log_ext_skip").format(title_type)
-                    self.log_signal.emit(msg_skip)
-                else:
-                    msg_ex_adv = self.T("log_phase3_adv").format(title_type).strip()
-                    msg_ex_norm = self.T("log_phase3_norm").format(title_type).strip()
-
-                    if adv_logs: self.log_signal.emit(msg_ex_adv)
-                    else: self.log_signal.emit(f" {msg_ex_norm}   {self._generate_bar(0, total_tids)}")
-                        
-                    for i, tid in enumerate(all_tids):
-                        if not self._is_running: break
-                        
-                        if tid in skipped_tids:
-                            global_current_step += 1
-                            self.progress_signal.emit(global_current_step, global_total_steps)
-                            continue
-                            
                         work_dir = raw_dir / tid
-                        
                         if adv_logs:
-                            self.log_signal.emit(self.T("log_worker_extract_id_adv").format(tid))
-                        else:
-                            self.log_replace_signal.emit(f" {msg_ex_norm}   {self._generate_bar(i + 1, total_tids)}")
-                        
-                        clean_tid = tid.replace("-", "").replace("/", "").replace("\\", "").strip()
+                            self.log_signal.emit(
+                                self.T("log_worker_dl_id_adv").format(tid)
+                            )
 
-                        if self.config.get("cafe_cemu_layout", False):
-                            if len(clean_tid) == 16:
-                                tid_high = clean_tid[:8].lower() 
-                                tid_low = clean_tid[8:].lower()  
-                                title_dest = self.region_dir / "Extracted" / "mlc01" / "sys" / "title" / tid_high / tid_low
+                        target_ver = title_versions.get(tid.lower())
+                        try:
+                            if not download_title_files(
+                                tid,
+                                str(work_dir),
+                                self.T,
+                                self.is_running,
+                                self.debug_log,
+                                target_ver,
+                                shared_session=shared_session,
+                            ):
+                                if self._is_running:
+                                    raise RuntimeError(self.T("err_dl_id").format(tid))
+                        except RuntimeError as e:
+                            if "404" in str(e):
+                                with self._prompt_lock:
+                                    if not self._is_running:
+                                        raise RuntimeError("STOPPED")
+
+                                    if self._always_skip_404:
+                                        self.log_signal.emit(self.T("log_skip_404").format(tid))
+                                        with self._data_lock:
+                                            skipped_tids.add(tid)
+                                    else:
+                                        self._skip_choice = None
+                                        self._always_choice = False
+                                        self._skip_event.clear()
+                                        self.ask_skip_signal.emit(tid)
+
+                                        while self._is_running and not self._skip_event.is_set():
+                                            self._skip_event.wait(timeout=0.05)
+
+                                        if not self._is_running:
+                                            raise RuntimeError("STOPPED")
+
+                                        if self._always_choice:
+                                            self._always_skip_404 = True
+
+                                        if self._skip_choice:
+                                            self.log_signal.emit(self.T("log_skip_404").format(tid))
+                                            with self._data_lock:
+                                                skipped_tids.add(tid)
+                                        else:
+                                            self.log_signal.emit(self.T("log_abort_404"))
+                                            raise RuntimeError(
+                                                self.T("err_abort_404").format(tid)
+                                            )
                             else:
-                                title_dest = self.region_dir / "Extracted" / "mlc01" / "sys" / "title" / clean_tid.lower()
-                        else:
-                            title_dest = self.region_dir / "Extracted" / title_type / clean_tid
+                                raise
 
-                        title_dest.mkdir(parents=True, exist_ok=True)
-                        process_title(tid, str(work_dir), str(title_dest), common_key, self.T, self.is_running, self.debug_log)
-                        
-                        global_current_step += 1
-                        self.progress_signal.emit(global_current_step, global_total_steps)
+                        with self._step_lock:
+                            completed_dl += 1
+                            global_current_step += 1
+                            if not adv_logs and self._is_running:
+                                self.log_replace_signal.emit(
+                                    f" {msg_dl_norm}   {self._generate_bar(completed_dl, total_tids)}"
+                                )
+                            self.progress_signal.emit(
+                                global_current_step, global_total_steps
+                            )
+
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=dl_workers) as executor:
+                        futures = [executor.submit(_download_task, tid) for tid in all_tids]
+                        try:
+                            for fut in concurrent.futures.as_completed(futures):
+                                if not self._is_running:
+                                    for f in futures:
+                                        f.cancel()
+                                    raise RuntimeError("STOPPED")
+                                fut.result()
+                        except Exception:
+                            for f in futures:
+                                f.cancel()
+                            raise
 
                     if not adv_logs and self._is_running:
-                        self.log_replace_signal.emit(f" {msg_ex_norm} ✓ {self._generate_bar(total_tids, total_tids)}")
+                        self.log_replace_signal.emit(
+                            f" {msg_dl_norm} ✓ {self._generate_bar(total_tids, total_tids)}"
+                        )
+
+                    if not self._is_running:
+                        break
+
+                    msg_vr_adv = self.T("log_phase2_adv").format(title_type).strip()
+                    msg_vr_norm = self.T("log_phase2_norm").format(title_type).strip()
+
+                    if adv_logs:
+                        self.log_signal.emit(msg_vr_adv)
+                    else:
+                        self.log_signal.emit(
+                            f" {msg_vr_norm}   {self._generate_bar(0, total_tids)}"
+                        )
+
+                    completed_vr = 0
+
+                    def _verify_task(tid):
+                        nonlocal completed_vr, global_current_step
+                        if not self._is_running:
+                            raise RuntimeError("STOPPED")
+
+                        if tid in skipped_tids:
+                            with self._step_lock:
+                                completed_vr += 1
+                                global_current_step += 1
+                                self.progress_signal.emit(
+                                    global_current_step, global_total_steps
+                                )
+                            return
+
+                        work_dir = raw_dir / tid
+                        if adv_logs:
+                            self.log_signal.emit(
+                                self.T("log_worker_verify_id_adv").format(tid)
+                            )
+
+                        if not verify_title_integrity(
+                            tid,
+                            str(work_dir),
+                            common_key,
+                            self.T,
+                            self.is_running,
+                            self.debug_log,
+                        ):
+                            if self._is_running:
+                                raise RuntimeError(self.T("err_integ_id").format(tid))
+
+                        with self._step_lock:
+                            completed_vr += 1
+                            global_current_step += 1
+                            if not adv_logs and self._is_running:
+                                self.log_replace_signal.emit(
+                                    f" {msg_vr_norm}   {self._generate_bar(completed_vr, total_tids)}"
+                                )
+                            self.progress_signal.emit(
+                                global_current_step, global_total_steps
+                            )
+
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=vr_workers) as executor:
+                        futures = [executor.submit(_verify_task, tid) for tid in all_tids]
+                        try:
+                            for fut in concurrent.futures.as_completed(futures):
+                                if not self._is_running:
+                                    for f in futures:
+                                        f.cancel()
+                                    raise RuntimeError("STOPPED")
+                                fut.result()
+                        except Exception:
+                            for f in futures:
+                                f.cancel()
+                            raise
+
+                    if not adv_logs and self._is_running:
+                        self.log_replace_signal.emit(
+                            f" {msg_vr_norm} ✓ {self._generate_bar(total_tids, total_tids)}"
+                        )
+
+                    if not self._is_running:
+                        break
+
+                    if not will_extract:
+                        msg_skip = self.T("log_ext_skip").format(title_type)
+                        self.log_signal.emit(msg_skip)
+                    else:
+                        msg_ex_adv = self.T("log_phase3_adv").format(title_type).strip()
+                        msg_ex_norm = self.T("log_phase3_norm").format(title_type).strip()
+
+                        if adv_logs:
+                            self.log_signal.emit(msg_ex_adv)
+                        else:
+                            self.log_signal.emit(
+                                f" {msg_ex_norm}   {self._generate_bar(0, total_tids)}"
+                            )
+
+                        completed_ex = 0
+
+                        def _extract_task(tid):
+                            nonlocal completed_ex, global_current_step
+                            if not self._is_running:
+                                raise RuntimeError("STOPPED")
+
+                            if tid in skipped_tids:
+                                with self._step_lock:
+                                    completed_ex += 1
+                                    global_current_step += 1
+                                    self.progress_signal.emit(
+                                        global_current_step, global_total_steps
+                                    )
+                                return
+
+                            work_dir = raw_dir / tid
+                            if adv_logs:
+                                self.log_signal.emit(
+                                    self.T("log_worker_extract_id_adv").format(tid)
+                                )
+
+                            clean_tid = (
+                                tid.replace("-", "")
+                                .replace("/", "")
+                                .replace("\\", "")
+                                .strip()
+                            )
+
+                            if self.config.get("cafe_cemu_layout", False):
+                                if len(clean_tid) == 16:
+                                    tid_high = clean_tid[:8].lower()
+                                    tid_low = clean_tid[8:].lower()
+                                    title_dest = (
+                                        self.region_dir
+                                        / "Extracted"
+                                        / "mlc01"
+                                        / "sys"
+                                        / "title"
+                                        / tid_high
+                                        / tid_low
+                                    )
+                                else:
+                                    title_dest = (
+                                        self.region_dir
+                                        / "Extracted"
+                                        / "mlc01"
+                                        / "sys"
+                                        / "title"
+                                        / clean_tid.lower()
+                                    )
+                            else:
+                                title_dest = self.region_dir / "Extracted" / title_type / clean_tid
+
+                            title_dest.mkdir(parents=True, exist_ok=True)
+                            process_title(
+                                tid,
+                                str(work_dir),
+                                str(title_dest),
+                                common_key,
+                                self.T,
+                                self.is_running,
+                                self.debug_log,
+                            )
+
+                            with self._step_lock:
+                                completed_ex += 1
+                                global_current_step += 1
+                                if not adv_logs and self._is_running:
+                                    self.log_replace_signal.emit(
+                                        f" {msg_ex_norm}   {self._generate_bar(completed_ex, total_tids)}"
+                                    )
+                                self.progress_signal.emit(
+                                    global_current_step, global_total_steps
+                                )
+
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=ex_workers) as executor:
+                            futures = [executor.submit(_extract_task, tid) for tid in all_tids]
+                            try:
+                                for fut in concurrent.futures.as_completed(futures):
+                                    if not self._is_running:
+                                        for f in futures:
+                                            f.cancel()
+                                        raise RuntimeError("STOPPED")
+                                    fut.result()
+                            except Exception:
+                                for f in futures:
+                                    f.cancel()
+                                raise
+
+                        if not adv_logs and self._is_running:
+                            self.log_replace_signal.emit(
+                                f" {msg_ex_norm} ✓ {self._generate_bar(total_tids, total_tids)}"
+                            )
+            finally:
+                shared_session.close()
 
             if not self._is_running:
                 self._cleanup_partial_files()
                 self.finished_signal.emit(False, "STOPPED")
                 return
 
+            final_dir_str = str(self.region_dir)
             self.region_dir = None
-            elapsed_time = time.time() - start_time
-            
+            elapsed_time = time.monotonic() - start_time
+
             self.log_signal.emit("\n==================================================")
             self.log_signal.emit(self.T("log_op_complete"))
             self.log_signal.emit("")
@@ -366,7 +596,7 @@ class CafeDownloaderWorker(QThread):
             self.log_signal.emit(self.T("log_titles_proc").format(total_processed_tids))
             self.log_signal.emit("")
             self.log_signal.emit(self.T("log_all_verified"))
-            
+
             if will_extract:
                 if self.config.get("cafe_cemu_layout", False):
                     self.log_signal.emit(self.T("log_ext_cemu"))
@@ -374,11 +604,11 @@ class CafeDownloaderWorker(QThread):
                     self.log_signal.emit(self.T("log_ext_offline"))
             else:
                 self.log_signal.emit(self.T("log_ext_isfshax"))
-                
+
             self.log_signal.emit("==================================================")
             self.progress_signal.emit(global_total_steps, global_total_steps)
             print("[CAFE WORKER] Operations concluded successfully.")
-            self.finished_signal.emit(True, "")
+            self.finished_signal.emit(True, final_dir_str)
 
         except Exception as e:
             print(f"[CAFE WORKER FATAL ERROR] {traceback.format_exc()}")

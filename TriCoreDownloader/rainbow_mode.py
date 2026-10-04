@@ -1,11 +1,20 @@
 import random
-from PyQt6.QtWidgets import QApplication, QColorDialog, QToolTip, QCheckBox, QRadioButton, QMessageBox, QLineEdit, QSlider
+from PyQt6.QtWidgets import (QApplication, QColorDialog, QToolTip, QCheckBox, 
+                             QRadioButton, QMessageBox, QLineEdit, QSlider, QComboBox)
 from PyQt6.QtGui import QColor, QCursor, QPalette
 from PyQt6.QtCore import Qt
 from .styles import update_app_theme
 from .config import save_config
 
+_DEFAULT_COLORS = {"#c6a1fa", "#bc181a", "#4ebcff", "#7e57c2", "#c4a1ff", "#e60012", "#009ac7", "auto", ""}
+
 class RainbowModeMixin:
+    def _refresh_rainbow_widget_cache(self):
+        self._cached_chk = self.findChildren(QCheckBox)
+        self._cached_rad = self.findChildren(QRadioButton)
+        self._cached_sliders = self.findChildren(QSlider)
+        self._cached_inputs = self.findChildren(QLineEdit)
+
     def get_console_style(self, hex_color=None):
         theme = self.config.get("theme", "auto")
         if theme == "auto":
@@ -31,10 +40,12 @@ class RainbowModeMixin:
         """
 
     def tick_rainbow(self):
-        if not self.isVisible() or self.isMinimized(): return
-        if QApplication.mouseButtons() != Qt.MouseButton.NoButton: return
+        if not self.isVisible() or self.isMinimized(): 
+            return
+        if QApplication.mouseButtons() != Qt.MouseButton.NoButton: 
+            return
             
-        speed = self.config.get("rainbow_speed", 2)
+        speed = max(1, min(6, int(self.config.get("rainbow_speed", 2))))
         increment = speed * 0.8
         self.rainbow_hue = (getattr(self, "rainbow_hue", 0.0) + increment) % 360.0
         
@@ -45,14 +56,18 @@ class RainbowModeMixin:
         c = QColor.fromHsvF(self.rainbow_hue / 360.0, sat_f, val_f)
         hex_color = c.name()
         
-        if hasattr(self, "last_rainbow_hex") and self.last_rainbow_hex == hex_color:
+        if getattr(self, "last_rainbow_hex", None) == hex_color:
             return
         self.last_rainbow_hex = hex_color
         
         indicator_border = "#8A8A95" if is_dark else "#ADB5BD"
         btn_txt = "#2B2B30" if is_dark else "#FFFFFF"
         
-        targets = self.config.get("rainbow_targets", {"title": True, "tabs": True, "buttons": True, "progress": True, "indicators": True, "text": False, "inputs": False, "console": False})
+        targets = self.config.get("rainbow_targets", {
+            "title": True, "tabs": True, "buttons": True, 
+            "progress": True, "indicators": True, "text": False, 
+            "inputs": False, "console": False
+        })
 
         if targets.get("title", True) and hasattr(self, "lbl_title"):
             self.lbl_title.setText(self.get_formatted_title(hex_color))
@@ -64,85 +79,90 @@ class RainbowModeMixin:
                 self.btn_update.setStyleSheet(f"QPushButton#btnHeader {{ background-color: {hex_color}; color: {btn_txt}; font-weight: bold; border-radius: 6px; padding: 6px 14px; border: none; }}")
             
         if targets.get("tabs", True):
+            nav_tab_css = f"QPushButton:checked {{ color: {hex_color}; border-bottom: 3px solid {hex_color}; }}"
             if hasattr(self, "btn_tab_dl"):
-                nav_tab_css = f"QPushButton:checked {{ color: {hex_color}; border-bottom: 3px solid {hex_color}; }}"
                 self.btn_tab_dl.setStyleSheet(nav_tab_css)
-                if hasattr(self, "btn_tab_cfg"): self.btn_tab_cfg.setStyleSheet(nav_tab_css)
-                if hasattr(self, "btn_tab_credits"): self.btn_tab_credits.setStyleSheet(f"QPushButton:checked {{ color: {hex_color}; }}")
+            if hasattr(self, "btn_tab_cfg"): 
+                self.btn_tab_cfg.setStyleSheet(nav_tab_css)
+            if hasattr(self, "btn_tab_credits"): 
+                self.btn_tab_credits.setStyleSheet(f"QPushButton:checked {{ color: {hex_color}; }}")
             
             if hasattr(self, "console_selector"):
-                theme_pref = self.config.get("theme", "auto")
-                if theme_pref == "oled":
-                    combo_bg, combo_text, combo_border_idle, arrow_color, hover_bg = "#000000", "#E0E0E0", "#333333", "%23E0E0E0", "#111111"
-                elif is_dark:
-                    combo_bg, combo_text, combo_border_idle, arrow_color, hover_bg = "#32323A", "#E8E8E8", "#555560", "%23E8E8E8", "#3C3C44"
+                if isinstance(self.console_selector, QComboBox):
+                    theme_pref = self.config.get("theme", "auto")
+                    if theme_pref == "oled":
+                        combo_bg, combo_text, combo_border_idle, arrow_color, hover_bg = "#000000", "#E0E0E0", "#333333", "%23E0E0E0", "#111111"
+                    elif is_dark:
+                        combo_bg, combo_text, combo_border_idle, arrow_color, hover_bg = "#32323A", "#E8E8E8", "#555560", "%23E8E8E8", "#3C3C44"
+                    else:
+                        combo_bg, combo_text, combo_border_idle, arrow_color, hover_bg = "#F8F9FA", "#212529", "#CED4DA", "%23212529", "#FFFFFF"
+                    
+                    arrow_svg = f"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='{arrow_color}' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>"
+                    
+                    self.console_selector.setStyleSheet(f"""
+                        QComboBox {{ 
+                            background-color: {combo_bg}; 
+                            color: {combo_text}; 
+                            border: 1px solid {combo_border_idle}; 
+                            border-radius: 6px; 
+                            padding: 4px 10px; 
+                            min-height: 24px; 
+                        }}
+                        QComboBox:hover, QComboBox:focus, QComboBox:on {{ 
+                            background-color: {hover_bg};
+                            border: 1px solid {hex_color}; 
+                        }}
+                        QComboBox::drop-down {{ 
+                            subcontrol-origin: padding; 
+                            subcontrol-position: top right; 
+                            width: 24px; 
+                            border: none; 
+                            background-color: transparent; 
+                        }}
+                        QComboBox::down-arrow {{ 
+                            image: url("{arrow_svg}"); 
+                            width: 14px; 
+                            height: 14px; 
+                            margin-right: 5px; 
+                        }}
+                        QComboBox QListView {{
+                            background-color: {combo_bg};
+                            color: {combo_text};
+                            selection-background-color: {hover_bg};
+                            selection-color: #FFFFFF;
+                            border: 1px solid {combo_border_idle};
+                            outline: none;
+                        }}
+                        QComboBox QListView::item {{
+                            padding: 6px;
+                        }}
+                    """)
                 else:
-                    combo_bg, combo_text, combo_border_idle, arrow_color, hover_bg = "#F8F9FA", "#212529", "#CED4DA", "%23212529", "#FFFFFF"
-                
-                arrow_svg = f"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='{arrow_color}' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>"
-                
-                self.console_selector.setStyleSheet(f"""
-                    QComboBox {{ 
-                        background-color: {combo_bg}; 
-                        color: {combo_text}; 
-                        border: 1px solid {combo_border_idle}; 
-                        border-radius: 6px; 
-                        padding: 4px 10px; 
-                        min-height: 24px; 
-                    }}
-                    QComboBox:hover, QComboBox:focus, QComboBox:on {{ 
-                        background-color: {hover_bg};
-                        border: 1px solid {hex_color}; 
-                    }}
-                    QComboBox::drop-down {{ 
-                        subcontrol-origin: padding; 
-                        subcontrol-position: top right; 
-                        width: 24px; 
-                        border: none; 
-                        background-color: transparent; 
-                    }}
-                    QComboBox::down-arrow {{ 
-                        image: url("{arrow_svg}"); 
-                        width: 14px; 
-                        height: 14px; 
-                        margin-right: 5px; 
-                    }}
-                    QComboBox QListView {{
-                        background-color: {combo_bg};
-                        color: {combo_text};
-                        selection-background-color: {hover_bg};
-                        selection-color: #FFFFFF;
-                        border: 1px solid {combo_border_idle};
-                        outline: none;
-                    }}
-                    QComboBox QListView::item {{
-                        padding: 6px;
-                    }}
-                """)
+                    self.console_selector.setStyleSheet(f"QPushButton#ConsoleSelector:hover {{ border: 1px solid {hex_color}; }}")
                 
         if targets.get("progress", True) and hasattr(self, "progress_bar"):
             self.progress_bar.setStyleSheet(f"QProgressBar::chunk {{ background-color: {hex_color}; border-radius: 4px; }}")
 
-        if targets.get("console", False) and hasattr(self, "console"):
-            self.console.setStyleSheet(self.get_console_style(hex_color))
-        elif hasattr(self, "console"):
-            self.console.setStyleSheet(self.get_console_style())
+        if targets.get("console", False):
+            if hasattr(self, "console"):
+                self.console.setStyleSheet(self.get_console_style(hex_color))
+                self._last_rainbow_console_styled = True
+        elif getattr(self, "_last_rainbow_console_styled", False):
+            if hasattr(self, "console"):
+                self.console.setStyleSheet(self.get_console_style())
+            self._last_rainbow_console_styled = False
 
         do_indicators = targets.get("indicators", True)
         do_text = targets.get("text", False)
         
         if do_indicators or do_text:
-            chk_css, rad_css = "", ""
-            
-            indicator_color = hex_color
-            if not do_indicators:
-                indicator_color = self.config.get("accent_color")
-                if not indicator_color:
-                    defaults = {"NX": "#c6a1fa", "CTR": "#bc181a", "CAFE": "#4ebcff"}
-                    indicator_color = defaults.get(self.config.get("console_mode", "NX"), "#c6a1fa")
+            if not hasattr(self, "_cached_chk"):
+                self._refresh_rainbow_widget_cache()
 
-            chk_css += f"QCheckBox::indicator:checked {{ background-color: {indicator_color}; border: 2px solid {indicator_color}; }} QCheckBox::indicator:hover {{ border: 2px solid {indicator_color}; }} "
-            rad_css += f"QRadioButton::indicator:checked {{ background-color: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 {indicator_color}, stop:0.55 {indicator_color}, stop:0.65 transparent); border: 2px solid {indicator_border}; }} QRadioButton::indicator:hover {{ border: 2px solid {indicator_color}; }} "
+            indicator_color = hex_color if do_indicators else self.get_current_accent_color()
+
+            chk_css = f"QCheckBox::indicator:checked {{ background-color: {indicator_color}; border: 2px solid {indicator_color}; }} QCheckBox::indicator:hover {{ border: 2px solid {indicator_color}; }} "
+            rad_css = f"QRadioButton::indicator:checked {{ background-color: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 {indicator_color}, stop:0.55 {indicator_color}, stop:0.65 transparent); border: 2px solid {indicator_border}; }} QRadioButton::indicator:hover {{ border: 2px solid {indicator_color}; }} "
             
             slider_bg = "#3A3A40" if is_dark else "#D1D1D6"
             slider_css = f"""
@@ -173,94 +193,78 @@ class RainbowModeMixin:
                 chk_css += f"QCheckBox:checked, QCheckBox:hover {{ color: {hex_color}; }} "
                 rad_css += f"QRadioButton:checked, QRadioButton:hover {{ color: {hex_color}; }} "
 
-            if hasattr(self, "volume_slider"): self.volume_slider.setStyleSheet(slider_css)
-            if hasattr(self, "slider_welcome_vol"): self.slider_welcome_vol.setStyleSheet(slider_css)
-            for chk in self.findChildren(QCheckBox): chk.setStyleSheet(chk_css)
-            for rad in self.findChildren(QRadioButton): rad.setStyleSheet(rad_css)
-            for slider in self.findChildren(QSlider): slider.setStyleSheet(slider_css)
+            if hasattr(self, "volume_slider"): 
+                self.volume_slider.setStyleSheet(slider_css)
+            if hasattr(self, "slider_welcome_vol"): 
+                self.slider_welcome_vol.setStyleSheet(slider_css)
+                
+            for chk in getattr(self, "_cached_chk", []):
+                try: chk.setStyleSheet(chk_css)
+                except RuntimeError: pass
+            for rad in getattr(self, "_cached_rad", []):
+                try: rad.setStyleSheet(rad_css)
+                except RuntimeError: pass
+            for slider in getattr(self, "_cached_sliders", []):
+                try: slider.setStyleSheet(slider_css)
+                except RuntimeError: pass
+            self._last_rainbow_indicators_styled = True
+        elif getattr(self, "_last_rainbow_indicators_styled", False):
+            for chk in getattr(self, "_cached_chk", []):
+                try: chk.setStyleSheet("")
+                except RuntimeError: pass
+            for rad in getattr(self, "_cached_rad", []):
+                try: rad.setStyleSheet("")
+                except RuntimeError: pass
+            for slider in getattr(self, "_cached_sliders", []):
+                try: slider.setStyleSheet("")
+                except RuntimeError: pass
+            if hasattr(self, "volume_slider"):
+                self.volume_slider.setStyleSheet("")
+            if hasattr(self, "slider_welcome_vol"):
+                self.slider_welcome_vol.setStyleSheet("")
+            self._last_rainbow_indicators_styled = False
                 
         if targets.get("inputs", False):
+            if not hasattr(self, "_cached_inputs"):
+                self._refresh_rainbow_widget_cache()
             input_css = f"QLineEdit:focus {{ border: 2px solid {hex_color}; }}"
-            for inp in self.findChildren(QLineEdit): inp.setStyleSheet(input_css)
+            for inp in getattr(self, "_cached_inputs", []):
+                try: inp.setStyleSheet(input_css)
+                except RuntimeError: pass
+            self._last_rainbow_inputs_styled = True
+        elif getattr(self, "_last_rainbow_inputs_styled", False):
+            for inp in getattr(self, "_cached_inputs", []):
+                try: inp.setStyleSheet("")
+                except RuntimeError: pass
+            self._last_rainbow_inputs_styled = False
 
     def apply_visual_settings(self):
-        print("[RAINBOW] Applying static visual settings.")
-        self.centralWidget().setStyleSheet("")
-        
-        accent = self.config.get("accent_color")
-        if not accent:
-            defaults = {"NX": "#c6a1fa", "CTR": "#bc181a", "CAFE": "#4ebcff"}
-            console = self.config.get("console_mode", "NX")
-            accent = defaults.get(console, "#c6a1fa")
-
-        is_dark = self.get_effective_is_dark()
-        indicator_border = "#8A8A95" if is_dark else "#ADB5BD"
-        btn_txt = "#2B2B30" if is_dark else "#FFFFFF"
+        if hasattr(self, "centralWidget") and self.centralWidget():
+            self.centralWidget().setStyleSheet("")
+        accent = self.get_current_accent_color()
 
         if hasattr(self, "lbl_title"):
             self.lbl_title.setText(self.get_formatted_title(accent))
             
         if hasattr(self, "btn_action"):
-            self.btn_action.setStyleSheet(f"QPushButton {{ background-color: {accent}; color: {btn_txt}; border: none; border-radius: 6px; }}")
+            self.btn_action.setStyleSheet("")
+            self.btn_action.style().unpolish(self.btn_action)
+            self.btn_action.style().polish(self.btn_action)
             
         if hasattr(self, "btn_update"):
-            self.btn_update.setStyleSheet(f"QPushButton#btnHeader {{ background-color: {accent}; color: {btn_txt}; font-weight: bold; border-radius: 6px; padding: 6px 14px; border: none; }}")
+            self.btn_update.setStyleSheet("")
+            self.btn_update.style().unpolish(self.btn_update)
+            self.btn_update.style().polish(self.btn_update)
             
         if hasattr(self, "btn_tab_dl"):
-            nav_tab_css = f"QPushButton:checked {{ color: {accent}; border-bottom: 3px solid {accent}; }}"
-            self.btn_tab_dl.setStyleSheet(nav_tab_css)
-            if hasattr(self, "btn_tab_cfg"): self.btn_tab_cfg.setStyleSheet(nav_tab_css)
-            if hasattr(self, "btn_tab_credits"): self.btn_tab_credits.setStyleSheet(f"QPushButton:checked {{ color: {accent}; }}")
+            self.btn_tab_dl.setStyleSheet("")
+            if hasattr(self, "btn_tab_cfg"): 
+                self.btn_tab_cfg.setStyleSheet("")
+            if hasattr(self, "btn_tab_credits"): 
+                self.btn_tab_credits.setStyleSheet("")
             
         if hasattr(self, "console_selector"):
-            theme_pref = self.config.get("theme", "auto")
-            if theme_pref == "oled":
-                combo_bg, combo_text, combo_border_idle, arrow_color, hover_bg = "#000000", "#E0E0E0", "#333333", "%23E0E0E0", "#111111"
-            elif is_dark:
-                combo_bg, combo_text, combo_border_idle, arrow_color, hover_bg = "#32323A", "#E8E8E8", "#555560", "%23E8E8E8", "#3C3C44"
-            else:
-                combo_bg, combo_text, combo_border_idle, arrow_color, hover_bg = "#F8F9FA", "#212529", "#CED4DA", "%23212529", "#FFFFFF"
-            
-            arrow_svg = f"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='{arrow_color}' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>"
-            
-            self.console_selector.setStyleSheet(f"""
-                QComboBox {{ 
-                    background-color: {combo_bg}; 
-                    color: {combo_text}; 
-                    border: 1px solid {combo_border_idle}; 
-                    border-radius: 6px; 
-                    padding: 4px 10px; 
-                    min-height: 24px; 
-                }}
-                QComboBox:hover, QComboBox:focus, QComboBox:on {{ 
-                    background-color: {hover_bg};
-                    border: 1px solid {accent}; 
-                }}
-                QComboBox::drop-down {{ 
-                    subcontrol-origin: padding; 
-                    subcontrol-position: top right; 
-                    width: 24px; 
-                    border: none; 
-                    background-color: transparent; 
-                }}
-                QComboBox::down-arrow {{ 
-                    image: url("{arrow_svg}"); 
-                    width: 14px; 
-                    height: 14px; 
-                    margin-right: 5px; 
-                }}
-                QComboBox QListView {{
-                    background-color: {combo_bg};
-                    color: {combo_text};
-                    selection-background-color: {hover_bg};
-                    selection-color: #FFFFFF;
-                    border: 1px solid {combo_border_idle};
-                    outline: none;
-                }}
-                QComboBox QListView::item {{
-                    padding: 6px;
-                }}
-            """)
+            self.console_selector.setStyleSheet("")
             
         if hasattr(self, "progress_bar"):
             self.progress_bar.setStyleSheet(f"QProgressBar::chunk {{ background-color: {accent}; border-radius: 4px; }}")
@@ -268,103 +272,91 @@ class RainbowModeMixin:
         if hasattr(self, "console"):
             self.console.setStyleSheet(self.get_console_style())
 
-        chk_css = f"QCheckBox::indicator:checked {{ background-color: {accent}; border: 2px solid {accent}; }} QCheckBox::indicator:hover {{ border: 2px solid {accent}; }} "
-        rad_css = f"QRadioButton::indicator:checked {{ background-color: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 {accent}, stop:0.55 {accent}, stop:0.65 transparent); border: 2px solid {indicator_border}; }} QRadioButton::indicator:hover {{ border: 2px solid {accent}; }} "
-        
-        slider_bg = "#3A3A40" if is_dark else "#D1D1D6"
-        slider_css = f"""
-            QSlider {{ 
-                min-height: 24px; 
-                background: transparent; 
-            }}
-            QSlider::groove:horizontal {{ 
-                height: 6px; 
-                background: {slider_bg}; 
-                border-radius: 3px; 
-                border: none; 
-            }}
-            QSlider::sub-page:horizontal {{ 
-                background: {accent}; 
-                border-radius: 3px; 
-            }}
-            QSlider::handle:horizontal {{ 
-                background: {accent}; 
-                width: 16px; 
-                height: 16px; 
-                margin: -5px 0; 
-                border-radius: 8px; 
-            }}
-        """
-
-        if hasattr(self, "volume_slider"): self.volume_slider.setStyleSheet(slider_css)
-        if hasattr(self, "slider_welcome_vol"): self.slider_welcome_vol.setStyleSheet(slider_css)
-        for chk in self.findChildren(QCheckBox): chk.setStyleSheet(chk_css)
-        for rad in self.findChildren(QRadioButton): rad.setStyleSheet(rad_css)
-        for slider in self.findChildren(QSlider): slider.setStyleSheet(slider_css)
-
-        input_css = f"QLineEdit:focus {{ border: 2px solid {accent}; }}"
-        for inp in self.findChildren(QLineEdit): inp.setStyleSheet(input_css)
+        self._refresh_rainbow_widget_cache()
+        for chk in getattr(self, "_cached_chk", []): 
+            try: chk.setStyleSheet("")
+            except RuntimeError: pass
+        for rad in getattr(self, "_cached_rad", []): 
+            try: rad.setStyleSheet("")
+            except RuntimeError: pass
+        for slider in getattr(self, "_cached_sliders", []): 
+            try: slider.setStyleSheet("")
+            except RuntimeError: pass
+        for inp in getattr(self, "_cached_inputs", []): 
+            try: inp.setStyleSheet("")
+            except RuntimeError: pass
             
         self.update_app_colors(self.config.get("accent_color", ""))
-        
         self.last_rainbow_hex = ""
+        self._last_rainbow_console_styled = False
+        self._last_rainbow_indicators_styled = False
+        self._last_rainbow_inputs_styled = False
         
         if self.config.get("rainbow_mode", False):
-            print("[RAINBOW] Enabling high-precision color loop.")
-            if not self.rainbow_timer.isActive():
+            if hasattr(self, "rainbow_timer") and not self.rainbow_timer.isActive():
                 self.rainbow_timer.setTimerType(Qt.TimerType.PreciseTimer)
                 self.rainbow_timer.start(33) 
-        else:
-            print("[RAINBOW] Disabling color loop.")
+        elif hasattr(self, "rainbow_timer"):
             self.rainbow_timer.stop()
 
     def update_app_colors(self, custom_color):
         theme_pref = self.config.get("theme", "auto")
         console = self.config.get("console_mode", "NX")
-        update_app_theme(QApplication.instance(), theme_pref, custom_color, console)
+        
+        color_param = "" if (not custom_color or str(custom_color).lower() in _DEFAULT_COLORS) else custom_color
+        update_app_theme(QApplication.instance(), theme_pref, color_param, console)
         
         if hasattr(self, "btn_color"): 
             self.update_color_button()
 
     def get_effective_is_dark(self):
         actual_theme = self.config.get("theme", "auto")
-        if actual_theme == "light": return False
-        if actual_theme in ["dark", "oled"]: return True
-        try:
-            scheme = QApplication.instance().styleHints().colorScheme()
-            return (scheme == Qt.ColorScheme.Dark)
-        except AttributeError:
-            palette = QApplication.instance().palette()
-            return palette.color(QPalette.ColorRole.Window).lightness() < 128
+        if actual_theme == "light": 
+            return False
+        if actual_theme in ["dark", "oled"]: 
+            return True
+        app = QApplication.instance()
+        if app:
+            try:
+                scheme = app.styleHints().colorScheme()
+                return scheme == Qt.ColorScheme.Dark
+            except AttributeError:
+                palette = app.palette()
+                return palette.color(QPalette.ColorRole.Window).lightness() < 128
+        return True
 
     def refresh_title_color(self):
-        if not hasattr(self, "lbl_title"): return
-        if self.config.get("rainbow_mode", False): return
-        
-        accent = self.config.get("accent_color")
-        if not accent:
-            defaults = {"NX": "#c6a1fa", "CTR": "#bc181a", "CAFE": "#4ebcff"}
-            console = self.config.get("console_mode", "NX")
-            accent = defaults.get(console, "#c6a1fa")
-            
-        self.lbl_title.setText(self.get_formatted_title(accent))
+        if not hasattr(self, "lbl_title"): 
+            return
+        if self.config.get("rainbow_mode", False): 
+            return
+        self.lbl_title.setText(self.get_formatted_title(self.get_current_accent_color()))
 
     def on_rainbow_toggle(self, checked):
-        print(f"[RAINBOW] Rainbow mode toggled: {checked}")
         if hasattr(self, "rainbow_options_widget"):
             self.rainbow_options_widget.setVisible(checked)
             
         if hasattr(self, "speed_widget"):
             self.speed_widget.setVisible(checked)
             
+        self.config["rainbow_mode"] = checked
+        if checked:
+            if hasattr(self, "rainbow_timer") and not self.rainbow_timer.isActive():
+                self.rainbow_timer.setTimerType(Qt.TimerType.PreciseTimer)
+                self.rainbow_timer.start(33)
+        else:
+            if hasattr(self, "rainbow_timer"):
+                self.rainbow_timer.stop()
+            self.apply_visual_settings()
+            
         self.trigger_auto_save()
 
     def on_rainbow_target_toggled(self):
-        if getattr(self, "_is_loading_ui", True): return
+        if getattr(self, "_is_loading_ui", True): 
+            return
         
         any_checked = any(cb.isChecked() for cb in getattr(self, "rainbow_target_cbs", {}).values())
         if not any_checked:
-            print("[RAINBOW] All targets disabled. Auto-deactivating rainbow mode.")
             self._is_loading_ui = True
             
             if hasattr(self, "chk_rainbow"):
@@ -399,17 +391,20 @@ class RainbowModeMixin:
             QToolTip.showText(QCursor.pos(), msg, self.btn_color, self.btn_color.rect(), 5000)
             return
 
-        print("[RAINBOW] Opening color picker dialog.")
         custom_colors = self.config.get("custom_colors", [])
         for i, hex_col in enumerate(custom_colors):
-            if i < QColorDialog.customCount(): QColorDialog.setCustomColor(i, QColor(hex_col))
+            if i < QColorDialog.customCount(): 
+                QColorDialog.setCustomColor(i, QColor(hex_col))
                 
         current_col = QColor(self.pending_color if getattr(self, "pending_color", None) else ("#C4A1FF" if self.get_effective_is_dark() else "#9D00FF"))
         color = QColorDialog.getColor(current_col, self, self.T("lbl_color") if hasattr(self, "T") else "Select Color")
         
         if color.isValid():
-            print(f"[RAINBOW] User selected new accent color: {color.name().upper()}")
             self.pending_color = color.name().upper()
+            self.config["accent_color"] = self.pending_color
+            if hasattr(self, "apply_console_theme_colors"):
+                self.apply_console_theme_colors()
+            self.apply_visual_settings()
             self.update_color_button()
             new_customs = [QColorDialog.customColor(i).name() for i in range(QColorDialog.customCount()) if QColorDialog.customColor(i).isValid()]
             self.config["custom_colors"] = new_customs
@@ -421,24 +416,29 @@ class RainbowModeMixin:
             QToolTip.showText(QCursor.pos(), msg, self.btn_reset_color, self.btn_reset_color.rect(), 5000)
             return
             
-        print("[RAINBOW] Resetting custom color to console default.")
         self.pending_color = ""
+        self.config["accent_color"] = ""
+        if hasattr(self, "apply_console_theme_colors"):
+            self.apply_console_theme_colors()
+        self.apply_visual_settings()
         self.update_color_button()
         self.trigger_auto_save()
 
     def update_color_button(self):
-        if not hasattr(self, "btn_color"): return
-        hex_color = getattr(self, "pending_color", "")
-        is_default = False
-        if not hex_color:
-            defaults = {"NX": "#c6a1fa", "CTR": "#bc181a", "CAFE": "#4ebcff"}
-            console = self.config.get("console_mode", "NX")
-            hex_color = defaults.get(console, "#c6a1fa")
-            is_default = True
+        if not hasattr(self, "btn_color"): 
+            return
+        raw_color = str(self.config.get("accent_color", "")).strip().lower()
         
-        c = QColor(hex_color)
-        luma = (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()) / 255
-        text_color = "#000000" if luma > 0.5 else "#FFFFFF"
-        
-        self.btn_color.setText(self.T("btn_color_auto") if is_default and hasattr(self, "T") else hex_color.upper())
-        self.btn_color.setStyleSheet(f"background-color: {hex_color}; color: {text_color}; font-weight: bold; border: 1px solid #CED4DA; border-radius: 6px; padding: 6px 16px;")
+        if not raw_color or raw_color in _DEFAULT_COLORS:
+            text_auto = self.T("btn_color_auto") if hasattr(self, "T") else "Auto"
+            if text_auto == "btn_color_auto":
+                text_auto = "Auto"
+            self.btn_color.setText(text_auto)
+            self.btn_color.setStyleSheet("")
+        else:
+            display_hex = raw_color.upper()
+            c = QColor(display_hex)
+            luma = (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()) / 255 if c.isValid() else 0
+            text_color = "#000000" if luma > 0.5 else "#FFFFFF"
+            self.btn_color.setText(display_hex)
+            self.btn_color.setStyleSheet(f"background-color: {display_hex}; color: {text_color}; font-weight: bold; border: 1px solid #CED4DA; border-radius: 6px; padding: 6px 16px;")

@@ -1,21 +1,26 @@
 import random
 import sys
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QGridLayout, QLabel, QPushButton, QStackedWidget, QMessageBox,
-                             QFrame, QButtonGroup, QCheckBox, QComboBox, QRadioButton, 
-                             QApplication, QSizePolicy, QScrollArea, QSlider, QLineEdit, QDialog)
+from PyQt6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+    QGridLayout, QLabel, QPushButton, QStackedWidget, QMessageBox,
+    QFrame, QButtonGroup, QCheckBox, QComboBox, QRadioButton, 
+    QApplication, QSizePolicy, QScrollArea, QSlider, QLineEdit, QDialog
+)
 from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QSize, QByteArray, QUrl
 from PyQt6.QtGui import QIcon, QPixmap, QCursor, QDesktopServices, QPainter, QColor
 
 from .config import save_config
+from .custom_widgets import CustomConsoleSelector
 from .ui_tabs import UiTabsMixin
 from .ui_tabs_settings import UiTabsSettingsMixin
 from .rainbow_mode import RainbowModeMixin
 from .settings_logic import SettingsMixin
 
-from .logos import (NX_LOGO_SVG, CTR_LOGO_BLACK_SVG, CTR_LOGO_WHITE_SVG, CAFE_LOGO_SVG, 
-                    CTR_LOGO_CLEAN_SVG, VOL_HIGH_SVG, VOL_LOW_SVG, VOL_MUTE_SVG, 
-                    RESTART_SVG, WARNING_SVG, TCD_MAIN_LOGO)
+from .logos import (
+    NX_LOGO_SVG, CTR_LOGO_BLACK_SVG, CTR_LOGO_WHITE_SVG, CAFE_LOGO_SVG, 
+    CTR_LOGO_CLEAN_SVG, VOL_HIGH_SVG, VOL_LOW_SVG, VOL_MUTE_SVG, 
+    RESTART_SVG, WARNING_SVG, TCD_MAIN_LOGO
+)
 from .ui_theme_locale import UiThemeLocaleMixin
 
 SCROLLBAR_CSS = """
@@ -51,7 +56,11 @@ class FirmwareAppUI(QMainWindow, UiTabsMixin, UiTabsSettingsMixin, RainbowModeMi
         self._is_loading_ui = True
         self.config = config_data  
         
-        from .Languages.locales import STRINGS
+        try:
+            from .Languages.locales import STRINGS
+        except Exception:
+            STRINGS = None
+
         if not STRINGS:
             msg = QDialog()
             msg.setWindowTitle("TriCoreDownloader (!ERROR!)")
@@ -149,7 +158,9 @@ class FirmwareAppUI(QMainWindow, UiTabsMixin, UiTabsSettingsMixin, RainbowModeMi
             if self.current_console not in ["NX", "CTR", "CAFE"]:
                 self.current_console = "NX"
 
-        self.pending_color = self.get_current_accent_color()
+        raw_color = str(self.config.get("accent_color", "")).strip().lower()
+        default_tokens = ["#c6a1fa", "#bc181a", "#4ebcff", "#7e57c2", "#c4a1ff", "#e60012", "#009ac7", "auto", ""]
+        self.pending_color = "" if (not raw_color or raw_color in default_tokens) else self.config.get("accent_color", "")
 
         self.setWindowOpacity(0.0)
         self.startup_anim = QPropertyAnimation(self, b"windowOpacity")
@@ -177,26 +188,22 @@ class FirmwareAppUI(QMainWindow, UiTabsMixin, UiTabsSettingsMixin, RainbowModeMi
         header_grid.setColumnStretch(1, 0)
         header_grid.setColumnStretch(2, 1)
         
-        self.console_selector = QComboBox()
-        self.console_selector.setObjectName("ConsoleSelector")
-        self.console_selector.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.console_selector.setIconSize(QSize(20, 20))
-        self.console_selector.setMinimumHeight(32)
-        self.console_selector.setMinimumWidth(180)
+        self.console_selector = CustomConsoleSelector()
+        self.console_selector.setMinimumHeight(42)
+        self.console_selector.setFixedWidth(200)
         
         self.refresh_all_static_icons()
         
-        self.console_selector.addItem(self.icon_nx, "\u00A0" + self.T("console_nx"))
-        self.console_selector.addItem(self.icon_ctr_selector, "\u00A0" + self.T("console_ctr"))
-        self.console_selector.addItem(self.icon_cafe, "\u00A0" + self.T("console_cafe"))
-        self.console_selector.addItem(self.T("console_welcome"))
-        self.console_selector.setItemData(3, QSize(0, 0), Qt.ItemDataRole.SizeHintRole)
+        self.console_selector.addItem(self.icon_nx, self.T("console_nx"))
+        self.console_selector.addItem(self.icon_ctr_selector, self.T("console_ctr"))
+        self.console_selector.addItem(self.icon_cafe, self.T("console_cafe"))
         
-        self.console_selector.blockSignals(True)
-        if self.current_console != "WELCOME": 
+        if self.current_console == "WELCOME":
+            mode_idx = 0
+        else:
             mode_idx = {"NX": 0, "CTR": 1, "CAFE": 2}.get(self.current_console, 0)
-        else: 
-            mode_idx = 3
+            
+        self.console_selector.blockSignals(True)
         self.console_selector.setCurrentIndex(mode_idx)
         self.console_selector.blockSignals(False)
         
@@ -300,6 +307,8 @@ class FirmwareAppUI(QMainWindow, UiTabsMixin, UiTabsSettingsMixin, RainbowModeMi
         main_layout.addWidget(self.bottom_widget)
 
         if self.current_console == "WELCOME":
+            self.header_widget.setVisible(False)
+            self.nav_wrapper.setVisible(False)
             self.btn_tab_credits.setVisible(False)
 
         self.nav_group = QButtonGroup(self)
@@ -310,6 +319,9 @@ class FirmwareAppUI(QMainWindow, UiTabsMixin, UiTabsSettingsMixin, RainbowModeMi
         
         self.worker = None
         self.setup_main_tab()
+        
+        if hasattr(self, "init_nx_firmware_list"):
+            self.init_nx_firmware_list()
         
         self.page_target_cafe = QWidget()
         layout_cafe = QVBoxLayout(self.page_target_cafe)
@@ -324,18 +336,19 @@ class FirmwareAppUI(QMainWindow, UiTabsMixin, UiTabsSettingsMixin, RainbowModeMi
 
         self.frame_warn_cafe = QFrame()
         self.frame_warn_cafe.setStyleSheet("border: 1px solid #FF4444; border-radius: 5px; background-color: rgba(255, 68, 68, 0.1);")
-        self.frame_warn_cafe.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.frame_warn_cafe.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         
         warn_layout = QVBoxLayout(self.frame_warn_cafe)
         warn_layout.setContentsMargins(12, 12, 12, 12)
+        warn_layout.setSizeConstraint(QVBoxLayout.SizeConstraint.SetMinimumSize)
         
         self.lbl_warn_cafe_downgrade = QLabel()
         self.lbl_warn_cafe_downgrade.setWordWrap(True)
-        
-        # FIX BRUTE FORCE : Hauteur minimum fixe imposée pour garantir la lisibilité
-        self.lbl_warn_cafe_downgrade.setMinimumHeight(150)
+        f_warn = self.lbl_warn_cafe_downgrade.font()
+        f_warn.setBold(True)
+        self.lbl_warn_cafe_downgrade.setFont(f_warn)
         self.lbl_warn_cafe_downgrade.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        self.lbl_warn_cafe_downgrade.setStyleSheet("color: #FF4444; font-weight: bold; border: none; background-color: transparent;")
+        self.lbl_warn_cafe_downgrade.setStyleSheet("color: #FF4444; border: none; background-color: transparent;")
         
         warn_layout.addWidget(self.lbl_warn_cafe_downgrade)
         self.frame_warn_cafe.setVisible(False)
@@ -419,6 +432,8 @@ class FirmwareAppUI(QMainWindow, UiTabsMixin, UiTabsSettingsMixin, RainbowModeMi
         def save_cafe_extract_options():
             self.config["cafe_extract"] = self.chk_cafe_extract.isChecked()
             self.config["cafe_cemu_layout"] = self.chk_cemu_layout.isChecked()
+            if hasattr(self, "trigger_auto_save"):
+                self.trigger_auto_save()
                 
         self.chk_cafe_extract.toggled.connect(save_cafe_extract_options)
         self.chk_cemu_layout.toggled.connect(save_cafe_extract_options)
@@ -503,6 +518,8 @@ class FirmwareAppUI(QMainWindow, UiTabsMixin, UiTabsSettingsMixin, RainbowModeMi
 
         def save_ctr_options():
             self.config["decrypt_cia"] = self.chk_ctr_decrypt.isChecked()
+            if hasattr(self, "trigger_auto_save"):
+                self.trigger_auto_save()
 
         self.chk_ctr_decrypt.toggled.connect(save_ctr_options)
         
@@ -548,7 +565,6 @@ class FirmwareAppUI(QMainWindow, UiTabsMixin, UiTabsSettingsMixin, RainbowModeMi
         
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll_area.wheelEvent = lambda event: event.ignore()
         
         scroll_widget = QWidget()
         scroll_widget.setStyleSheet("background-color: transparent;")
@@ -693,24 +709,26 @@ class FirmwareAppUI(QMainWindow, UiTabsMixin, UiTabsSettingsMixin, RainbowModeMi
             pm_vol = QPixmap()
             pm_vol.loadFromData(QByteArray(svg_data), "SVG")
             
-            painter = QPainter(pm_vol)
-            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-            painter.fillRect(pm_vol.rect(), QColor(text_color))
-            painter.end()
-            
-            self.lbl_welcome_vol_icon.setPixmap(pm_vol.scaled(20, 20, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            if not pm_vol.isNull():
+                painter = QPainter(pm_vol)
+                painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+                painter.fillRect(pm_vol.rect(), QColor(text_color))
+                painter.end()
+                self.lbl_welcome_vol_icon.setPixmap(pm_vol.scaled(20, 20, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
 
         self.update_welcome_vol_icon = _update_vol_icon
         self.update_welcome_vol_icon(current_vol)
 
         self._pre_mute_welcome_vol = current_vol if current_vol > 0 else 50
         def toggle_welcome_mute(event):
-            if self.slider_welcome_vol.value() > 0:
-                self._pre_mute_welcome_vol = self.slider_welcome_vol.value()
-                self.slider_welcome_vol.setValue(0)
-            else:
-                restored_vol = self._pre_mute_welcome_vol if self._pre_mute_welcome_vol > 0 else 50
-                self.slider_welcome_vol.setValue(restored_vol)
+            if event.button() == Qt.MouseButton.LeftButton:
+                if self.slider_welcome_vol.value() > 0:
+                    self._pre_mute_welcome_vol = self.slider_welcome_vol.value()
+                    self.slider_welcome_vol.setValue(0)
+                else:
+                    restored_vol = self._pre_mute_welcome_vol if self._pre_mute_welcome_vol > 0 else 50
+                    self.slider_welcome_vol.setValue(restored_vol)
+                event.accept()
                 
         self.lbl_welcome_vol_icon.mousePressEvent = toggle_welcome_mute
 
@@ -773,25 +791,22 @@ class FirmwareAppUI(QMainWindow, UiTabsMixin, UiTabsSettingsMixin, RainbowModeMi
 
         if hasattr(self, "console_selector") and self.console_selector.count() >= 3:
             self.console_selector.blockSignals(True)
-            current_idx = self.console_selector.currentIndex()
             if hasattr(self, "icon_nx"): self.console_selector.setItemIcon(0, self.icon_nx)
             if hasattr(self, "icon_ctr_selector"): self.console_selector.setItemIcon(1, self.icon_ctr_selector)
             if hasattr(self, "icon_cafe"): self.console_selector.setItemIcon(2, self.icon_cafe)
-            if current_idx != -1:
-                self.console_selector.setCurrentIndex(-1)
-                self.console_selector.setCurrentIndex(current_idx)
             self.console_selector.blockSignals(False)
 
         if hasattr(self, "btn_tab_restart"):
             try:
                 pm_restart = QPixmap()
                 pm_restart.loadFromData(QByteArray(RESTART_SVG), "SVG")
-                color_restart = "#FFFFFF" if is_dark else "#333333"
-                painter = QPainter(pm_restart)
-                painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-                painter.fillRect(pm_restart.rect(), QColor(color_restart))
-                painter.end()
-                self.btn_tab_restart.setIcon(QIcon(pm_restart))
+                if not pm_restart.isNull():
+                    color_restart = "#FFFFFF" if is_dark else "#333333"
+                    painter = QPainter(pm_restart)
+                    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+                    painter.fillRect(pm_restart.rect(), QColor(color_restart))
+                    painter.end()
+                    self.btn_tab_restart.setIcon(QIcon(pm_restart))
             except Exception: pass
 
         if hasattr(self, "btn_tab_credits"):
@@ -799,14 +814,15 @@ class FirmwareAppUI(QMainWindow, UiTabsMixin, UiTabsSettingsMixin, RainbowModeMi
                 info_svg = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="#888888" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>'
                 pm_info = QPixmap()
                 pm_info.loadFromData(QByteArray(info_svg), "SVG")
-                color_info = "#FFFFFF" if is_dark else "#888888"
-                painter = QPainter(pm_info)
-                painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-                painter.fillRect(pm_info.rect(), QColor(color_info))
-                painter.end()
-                info_icon = QIcon(pm_info)
-                info_icon.addPixmap(pm_info, QIcon.Mode.Disabled)
-                self.btn_tab_credits.setIcon(info_icon)
+                if not pm_info.isNull():
+                    color_info = "#FFFFFF" if is_dark else "#888888"
+                    painter = QPainter(pm_info)
+                    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+                    painter.fillRect(pm_info.rect(), QColor(color_info))
+                    painter.end()
+                    info_icon = QIcon(pm_info)
+                    info_icon.addPixmap(pm_info, QIcon.Mode.Disabled)
+                    self.btn_tab_credits.setIcon(info_icon)
             except Exception: pass
 
         if hasattr(self, "btn_welcome_ctr"):
@@ -823,3 +839,264 @@ class FirmwareAppUI(QMainWindow, UiTabsMixin, UiTabsSettingsMixin, RainbowModeMi
         if hasattr(self, "update_welcome_vol_icon"):
             try: self.update_welcome_vol_icon()
             except Exception: pass
+
+    def _update_cafe_adv_ui(self, *args):
+        adv_on = getattr(self, "chk_adv_mode", None)
+        adv_checked = adv_on.isChecked() if adv_on else self.config.get("advanced_mode", False)
+        saved_adv = self.config.get("advanced_mode", False)
+        
+        auto_save_on = getattr(self, "chk_auto_save", None)
+        is_auto_save = auto_save_on.isChecked() if auto_save_on else self.config.get("auto_save", False)
+        
+        effective_adv = adv_checked if is_auto_save else saved_adv
+            
+        if hasattr(self, "radio_manual") and hasattr(self, "radio_latest"):
+            if hasattr(self, "current_console") and self.current_console == "NX":
+                if hasattr(self, "radio_list"):
+                    self.radio_list.setVisible(effective_adv)
+                    if hasattr(self, "list_input_container"):
+                        self.list_input_container.setVisible(effective_adv and self.radio_list.isChecked())
+                    if not effective_adv and self.radio_list.isChecked():
+                        self.radio_latest.setChecked(True)
+                self.radio_manual.setVisible(effective_adv)
+                if not effective_adv and self.radio_manual.isChecked():
+                    self.radio_latest.setChecked(True)
+                    if hasattr(self, "input_manual"):
+                        self.input_manual.setVisible(False)
+            else:
+                if hasattr(self, "radio_list"):
+                    self.radio_list.setVisible(False)
+                    if hasattr(self, "list_input_container"):
+                        self.list_input_container.setVisible(False)
+                    if self.radio_list.isChecked():
+                        self.radio_latest.setChecked(True)
+                if hasattr(self, "radio_manual"):
+                    self.radio_manual.setVisible(effective_adv)
+                    if not effective_adv and self.radio_manual.isChecked():
+                        self.radio_latest.setChecked(True)
+
+        if hasattr(self, "cont_cafe_extract"): 
+            self.cont_cafe_extract.setVisible(effective_adv)
+            
+        if hasattr(self, "cont_cemu_layout"): 
+            extract_checked = getattr(self, "chk_cafe_extract", None)
+            is_extract = extract_checked.isChecked() if extract_checked else False
+            
+            if not is_extract and hasattr(self, "chk_cemu_layout") and self.chk_cemu_layout.isChecked():
+                self.chk_cemu_layout.blockSignals(True)
+                self.chk_cemu_layout.setChecked(False)
+                self.config["cafe_cemu_layout"] = False
+                self.chk_cemu_layout.blockSignals(False)
+                
+            self.cont_cemu_layout.setVisible(effective_adv and is_extract)
+            
+        if not effective_adv:
+            if hasattr(self, "chk_cafe_extract") and is_auto_save: 
+                self.chk_cafe_extract.setChecked(False)
+            if hasattr(self, "chk_cemu_layout") and is_auto_save: 
+                self.chk_cemu_layout.setChecked(False)
+
+    def _on_lang_changed(self, index):
+        new_lang = None
+        if hasattr(self, "combo_lang"):
+            new_lang = self.combo_lang.itemData(index)
+        if not new_lang and hasattr(self, "lang_codes") and 0 <= index < len(self.lang_codes):
+            new_lang = self.lang_codes[index]
+            
+        if new_lang:
+            self.config["lang"] = str(new_lang).strip().upper()
+            save_config(self.config)
+            
+            if hasattr(self, "reload_locales"):
+                self.reload_locales()
+                
+            if hasattr(self, "trigger_auto_save"):
+                self.trigger_auto_save()
+                
+            if hasattr(self, "retranslate_ui"):
+                QTimer.singleShot(170, self.retranslate_ui)
+
+    def retranslate_ui(self):
+        try:
+            mode_titles = {"NX": self.T("title_nx"), "CTR": self.T("title_ctr"), "CAFE": self.T("title_cafe")}
+            self.setWindowTitle(mode_titles.get(self.current_console, self.T("title")))
+        except Exception: pass
+        
+        try:
+            if hasattr(self, "lbl_title"): self.refresh_title_color()
+            if hasattr(self, "lbl_sub"): self.lbl_sub.setText(self.T("subtitle"))
+        except Exception: pass
+        
+        try:
+            if hasattr(self, "btn_tab_dl"): self.btn_tab_dl.setText(self.T("tab_dl"))
+            if hasattr(self, "btn_tab_cfg"): self.btn_tab_cfg.setText(self.T("tab_cfg"))
+            if hasattr(self, "btn_tab_credits"): self.btn_tab_credits.setText(self.T("tab_credits"))
+            if hasattr(self, "btn_tab_restart"): self.btn_tab_restart.setText(" " + self.T("btn_restart_app"))
+        except Exception: pass
+        
+        try:
+            self.update_sys_info_label()
+        except Exception: pass
+        
+        try:
+            if hasattr(self, "lbl_grp_target"): self.lbl_grp_target.setText(self.T("grp_target"))
+            if hasattr(self, "radio_latest"): self.radio_latest.setText(self.T("opt_latest"))
+            if hasattr(self, "radio_list"): self.radio_list.setText(self.T("opt_list"))
+            if hasattr(self, "radio_manual"): self.radio_manual.setText(self.T("opt_manual"))
+            if hasattr(self, "lbl_list_hint"): self.lbl_list_hint.setText(self.T("lbl_list_hint"))
+            if hasattr(self, "lbl_manual_hint"): self.lbl_manual_hint.setText(self.T("lbl_manual_hint"))
+            if hasattr(self, "lbl_manual_hint_cafe"): self.lbl_manual_hint_cafe.setText(self.T("lbl_manual_hint_cafe"))
+            if hasattr(self, "lbl_warn_cafe_downgrade"): self.lbl_warn_cafe_downgrade.setText(self.T("warn_cafe_downgrade"))
+            if hasattr(self, "lbl_grp_live"): self.lbl_grp_live.setText(self.T("grp_live"))
+            if hasattr(self, "btn_clear_console"): self.btn_clear_console.setText(self.T("btn_clear_console"))
+        except Exception: pass
+
+        try:
+            if hasattr(self, "chk_build_nsp"):
+                self.chk_build_nsp.setText(self.T("build_nsp_checkbox"))
+                self.chk_build_nsp.setToolTip(self.T("tt_build_nsp"))
+
+            if hasattr(self, "btn_action"):
+                if getattr(self, "worker", None) and self.worker.isRunning(): 
+                    self.btn_action.setText(self.T("btn_stop"))
+                else: 
+                    self.btn_action.setText(self.T("btn_start"))
+        except Exception: pass
+                
+        try:
+            if hasattr(self, "lbl_grp_crypto"): self.lbl_grp_crypto.setText(self.T("grp_crypto"))
+            if hasattr(self, "grp_crypto") and hasattr(self.grp_crypto, "setTitle"): self.grp_crypto.setTitle(self.T("grp_crypto"))
+            if hasattr(self, "lbl_grp_app"): self.lbl_grp_app.setText(self.T("grp_app"))
+            if hasattr(self, "grp_app") and hasattr(self.grp_app, "setTitle"): self.grp_app.setTitle(self.T("grp_app"))
+            if hasattr(self, "lbl_lang"): self.lbl_lang.setText(self.T("lbl_lang"))
+            if hasattr(self, "lbl_color"): self.lbl_color.setText(self.T("lbl_color"))
+            if hasattr(self, "lbl_theme"): self.lbl_theme.setText(self.T("lbl_theme"))
+        except Exception: pass
+        
+        try:
+            if hasattr(self, "combo_theme"):
+                self.combo_theme.blockSignals(True)
+                self.combo_theme.setItemText(0, self.T("theme_auto"))
+                self.combo_theme.setItemText(1, self.T("theme_light"))
+                self.combo_theme.setItemText(2, self.T("theme_dark"))
+                self.combo_theme.setItemText(3, self.T("theme_oled"))
+                cur_th = self.combo_theme.currentIndex()
+                if 0 <= cur_th < self.combo_theme.count():
+                    self.combo_theme.setCurrentIndex(cur_th)
+                self.combo_theme.blockSignals(False)
+        except Exception: pass
+        
+        try:
+            if hasattr(self, "lbl_cafe_part"): self.lbl_cafe_part.setText(self.T("cafe_lbl_part"))
+            if hasattr(self, "radio_mlc"): self.radio_mlc.setText(self.T("cafe_part_mlc"))
+            if hasattr(self, "radio_slc"): self.radio_slc.setText(self.T("cafe_part_slc"))
+            if hasattr(self, "radio_both"): self.radio_both.setText(self.T("cafe_part_both"))
+            if hasattr(self, "lbl_cafe_reg"): self.lbl_cafe_reg.setText(self.T("cafe_lbl_reg"))
+            if hasattr(self, "radio_eur"): self.radio_eur.setText(self.T("cafe_reg_eur"))
+            if hasattr(self, "radio_usa"): self.radio_usa.setText(self.T("cafe_reg_usa"))
+            if hasattr(self, "radio_jpn"): self.radio_jpn.setText(self.T("cafe_reg_jpn"))
+            if hasattr(self, "chk_cafe_extract"): self.chk_cafe_extract.setText(self.T("chk_cafe_extract"))
+            if hasattr(self, "chk_cemu_layout"): self.chk_cemu_layout.setText(self.T("chk_cemu_layout"))
+
+            if hasattr(self, "lbl_ctr_model"): self.lbl_ctr_model.setText(self.T("ctr_lbl_model"))
+            if hasattr(self, "radio_old_3ds"): self.radio_old_3ds.setText(self.T("ctr_model_old"))
+            if hasattr(self, "radio_new_3ds"): self.radio_new_3ds.setText(self.T("ctr_model_new"))
+            if hasattr(self, "lbl_ctr_reg"): self.lbl_ctr_reg.setText(self.T("ctr_lbl_reg"))
+            if hasattr(self, "radio_ctr_eur"): self.radio_ctr_eur.setText(self.T("ctr_reg_eur"))
+            if hasattr(self, "radio_ctr_usa"): self.radio_ctr_usa.setText(self.T("ctr_reg_usa"))
+            if hasattr(self, "radio_ctr_jpn"): self.radio_ctr_jpn.setText(self.T("ctr_reg_jpn"))
+            if hasattr(self, "lbl_rainbow_hint"): self.lbl_rainbow_hint.setText(self.T("lbl_rainbow_hint"))
+        except Exception: pass
+            
+        chk_labels_map = {
+            "lbl_chk_rainbow": "chk_rainbow",
+            "lbl_chk_adv_mode": "chk_adv_mode",
+            "lbl_chk_resize": "chk_resize",
+            "lbl_chk_adv_logs": "chk_adv_logs",
+            "lbl_chk_exfat": "chk_exfat",
+            "lbl_chk_hide_warn": "chk_hide_warn",
+            "chk_rainbow": "chk_rainbow",
+            "chk_resize": "chk_resize",
+            "chk_adv_mode": "chk_adv_mode",
+            "chk_adv_logs": "chk_adv_logs",
+            "chk_auto_save": "chk_auto_save",
+            "chk_hide_warn": "chk_hide_warn",
+            "chk_exfat": "chk_exfat",
+            "chk_use_aria2c": "chk_use_aria2c",
+            "chk_unlimited_console": "chk_unlimited_console",
+            "lbl_chk_unlimited_console": "chk_unlimited_console",
+            "lbl_chk_aria2c": "chk_use_aria2c"
+        }
+        for attr, key in chk_labels_map.items():
+            try:
+                if hasattr(self, attr): 
+                    getattr(self, attr).setText(self.T(key))
+            except Exception: pass
+        
+        try:
+            if hasattr(self, "rainbow_target_cbs"):
+                rb_keys = { "title": "rb_title", "tabs": "rb_tabs", "buttons": "rb_btns", "progress": "rb_progress", "indicators": "rb_indicators", "text": "rb_text", "inputs": "rb_inputs", "console": "rb_console" }
+                for k, cb in self.rainbow_target_cbs.items():
+                    cb.setText(self.T(rb_keys.get(k, f"rb_{k}")))
+            
+            if hasattr(self, "lbl_save_hint"): self.lbl_save_hint.setText(self.T("lbl_save_hint"))
+            if hasattr(self, "lbl_speed_text"): self.lbl_speed_text.setText(self.T("lbl_rb_speed"))
+        except Exception: pass
+
+        try:
+            if hasattr(self, "labels_config"):
+                keys_map = { "hactool": "lbl_hactool", "keys": "lbl_keys", "prodinfo": "lbl_prodinfo", "otp": "lbl_otp", "out": "lbl_out", "boot9": "lbl_boot9" }
+                for key, label in self.labels_config.items():
+                    label.setText(self.T(keys_map.get(key, key)))
+
+            if hasattr(self, "input_boot9"):
+                self.input_boot9.setPlaceholderText(self.T("ctr_hint_boot9"))
+
+            if hasattr(self, "btn_auto_detect_aria"): self.btn_auto_detect_aria.setText(self.T("btn_auto_detect"))
+            if hasattr(self, "lbl_aria2c"): self.lbl_aria2c.setText(self.T("lbl_aria2c"))
+            if hasattr(self, "lbl_openssl"): self.lbl_openssl.setText(self.T("lbl_openssl"))
+            if hasattr(self, "btn_suggest"): self.btn_suggest.setText(self.T("btn_suggest"))
+            if hasattr(self, "btn_save"): self.btn_save.setText(self.T("btn_save"))
+            
+            for btn in getattr(self, "browse_buttons", []):
+                btn.setText(self.T("btn_browse"))
+                btn.setMinimumWidth(85)
+                
+            if hasattr(self, "btn_reset_center"): self.btn_reset_center.setText(self.T("btn_reset"))
+            if hasattr(self, "btn_reset_right"): self.btn_reset_right.setText(self.T("btn_reset"))
+            if hasattr(self, "lbl_credits_title"): self.lbl_credits_title.setText(self.T("credits_header"))
+            if hasattr(self, "lbl_credits_text"): self.lbl_credits_text.setText(self.T("credits_text"))
+        except Exception: pass
+        
+        try:
+            if hasattr(self, "lbl_welcome_title"): self.lbl_welcome_title.setText(self.T("welcome_title"))
+            if hasattr(self, "lbl_welcome_intro"): self.lbl_welcome_intro.setText(self.T("welcome_subtitle"))
+            if hasattr(self, "lbl_welcome_info_title"): self.lbl_welcome_info_title.setText(self.T("welcome_info_title"))
+            if hasattr(self, "lbl_welcome_info_desc"): self.lbl_welcome_info_desc.setText(self.T("welcome_info_desc"))
+            if hasattr(self, "lbl_welcome_info_risk"): self.lbl_welcome_info_risk.setText(self.T("welcome_info_risk"))
+            if hasattr(self, "chk_welcome_adv"): self.chk_welcome_adv.setText(self.T("chk_welcome_adv"))
+            if hasattr(self, "chk_welcome_logs"): self.chk_welcome_logs.setText(self.T("chk_welcome_logs"))
+            if hasattr(self, "btn_welcome_help"): self.btn_welcome_help.setToolTip(self.T("tooltip_welcome_adv"))
+            if hasattr(self, "btn_welcome_cafe"): self.btn_welcome_cafe.setText(" " + self.T("console_cafe"))
+            if hasattr(self, "btn_welcome_nx"): self.btn_welcome_nx.setText(" " + self.T("console_nx"))
+            if hasattr(self, "btn_welcome_ctr"): self.btn_welcome_ctr.setText(" " + self.T("console_ctr"))
+        except Exception: pass
+
+        try:
+            if hasattr(self, "console_selector"):
+                self.console_selector.setItemText(0, self.T("console_nx"))
+                self.console_selector.setItemText(1, self.T("console_ctr"))
+                self.console_selector.setItemText(2, self.T("console_cafe"))
+
+            if hasattr(self, "btn_update"):
+                self.btn_update.setText(self.T("btn_update"))
+        except Exception: pass
+
+        try:
+            self.refresh_all_icons()
+            self.update_dl_mode_label()
+            if hasattr(self, "update_manual_input_context"):
+                self.update_manual_input_context()
+        except Exception: pass
+
+        self.update()

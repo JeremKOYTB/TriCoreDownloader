@@ -2,7 +2,7 @@ import os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QLineEdit, QPushButton, QProgressBar, QFrame, 
                              QRadioButton, QScrollArea, QButtonGroup, 
-                             QSizePolicy, QPlainTextEdit, QCheckBox)
+                             QSizePolicy, QPlainTextEdit, QCheckBox, QComboBox, QStyledItemDelegate)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QTextOption
 
@@ -32,6 +32,15 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
 }
 """
 
+class CenteredComboDelegate(QStyledItemDelegate):
+    def initStyleOption(self, option, index):
+        super().initStyleOption(option, index)
+        option.displayAlignment = Qt.AlignmentFlag.AlignCenter
+
+    def paint(self, painter, option, index):
+        option.displayAlignment = Qt.AlignmentFlag.AlignCenter
+        super().paint(painter, option, index)
+
 class UiTabsMixin:
     def create_wrapped_checkbox(self, chk_obj, text, indent=0):
         chk_obj.setText("")
@@ -39,12 +48,18 @@ class UiTabsMixin:
         lbl.setWordWrap(True)
         lbl.setCursor(Qt.CursorShape.PointingHandCursor)
         
-        lbl.mousePressEvent = lambda e: chk_obj.click()
+        def on_label_click(e):
+            if e.button() == Qt.MouseButton.LeftButton:
+                chk_obj.click()
+                e.accept()
+                
+        lbl.mousePressEvent = on_label_click
         
         lbl.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         lbl.setMinimumHeight(lbl.fontMetrics().height() * 2)
         
         chk_obj.setText = lbl.setText
+        chk_obj.text = lbl.text
         
         cont = QWidget()
         cont.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
@@ -55,7 +70,6 @@ class UiTabsMixin:
         
         lay.addWidget(chk_obj, 0, Qt.AlignmentFlag.AlignVCenter)
         lay.addWidget(lbl, 0, Qt.AlignmentFlag.AlignVCenter)
-        
         lay.addStretch(1) 
         
         return cont, lbl
@@ -74,6 +88,9 @@ class UiTabsMixin:
         return card, layout, lbl_title
 
     def add_grid_row_extended(self, grid, row, label_text, line_edit, browse_func, help_func=None):
+        if not hasattr(self, "browse_buttons"):
+            self.browse_buttons = []
+            
         lbl = QLabel(label_text)
         lbl.setMinimumWidth(150)
         
@@ -104,8 +121,10 @@ class UiTabsMixin:
         return lbl, btns_widget
 
     def update_manual_input_context(self):
+        if not hasattr(self, "input_manual") or not hasattr(self, "lbl_datfile_link"):
+            return
+            
         mode = getattr(self, 'current_console', 'NX')
-        
         if mode == 'NX':
             self.input_manual.setPlaceholderText(self.T("ph_manual_version_nx"))
             self.lbl_datfile_link.setText(self.T("manual_link_nx"))
@@ -137,7 +156,30 @@ class UiTabsMixin:
         self.radio_group = QButtonGroup(self)
         self.radio_latest = QRadioButton(self.T("opt_latest"))
         self.radio_latest.setChecked(True)
+        self.radio_list = QRadioButton(self.T("opt_list"))
         self.radio_manual = QRadioButton(self.T("opt_manual"))
+        
+        self.list_input_container = QWidget()
+        list_layout = QVBoxLayout(self.list_input_container)
+        list_layout.setContentsMargins(0, 0, 0, 0)
+        list_layout.setSpacing(4)
+        
+        self.combo_nx_fw = QComboBox()
+        self.combo_nx_fw.setMinimumHeight(36)
+        self.combo_nx_fw.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.combo_nx_fw.setItemDelegate(CenteredComboDelegate(self.combo_nx_fw))
+        self.combo_nx_fw.addItem(self.T("lbl_loading_firmwares"), userData="")
+        self.combo_nx_fw.setItemData(0, Qt.AlignmentFlag.AlignCenter, Qt.ItemDataRole.TextAlignmentRole)
+        
+        self.lbl_list_hint = QLabel(self.T("lbl_list_hint"))
+        self.lbl_list_hint.setObjectName("HintText")
+        self.lbl_list_hint.setWordWrap(True)
+        self.lbl_list_hint.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        self.lbl_list_hint.setStyleSheet("padding-left: 2px; margin-top: 4px; margin-bottom: 4px; line-height: 1.4;")
+        
+        list_layout.addWidget(self.combo_nx_fw)
+        list_layout.addWidget(self.lbl_list_hint)
+        self.list_input_container.setVisible(False)
         
         self.manual_input_container = QWidget()
         manual_layout = QVBoxLayout(self.manual_input_container)
@@ -167,16 +209,27 @@ class UiTabsMixin:
         
         self.manual_input_container.setVisible(False)
         
-        def toggle_manual(checked):
-            self.manual_input_container.setVisible(checked)
-            self.update_manual_input_context()
-            
-        self.radio_manual.toggled.connect(toggle_manual)
+        def update_target_containers():
+            is_manual = self.radio_manual.isChecked()
+            is_list = self.radio_list.isChecked()
+            if self.manual_input_container.isVisible() != is_manual:
+                self.manual_input_container.setVisible(is_manual)
+            if self.list_input_container.isVisible() != is_list:
+                self.list_input_container.setVisible(is_list)
+            if is_manual:
+                self.update_manual_input_context()
+                
+        self.radio_latest.toggled.connect(lambda c: update_target_containers() if c else None)
+        self.radio_list.toggled.connect(lambda c: update_target_containers() if c else None)
+        self.radio_manual.toggled.connect(lambda c: update_target_containers() if c else None)
         
         self.radio_group.addButton(self.radio_latest)
+        self.radio_group.addButton(self.radio_list)
         self.radio_group.addButton(self.radio_manual)
         
         self.scroll_layout.addWidget(self.radio_latest)
+        self.scroll_layout.addWidget(self.radio_list)
+        self.scroll_layout.addWidget(self.list_input_container)
         self.scroll_layout.addWidget(self.radio_manual)
         self.scroll_layout.addWidget(self.manual_input_container)
         
@@ -184,7 +237,7 @@ class UiTabsMixin:
         self.chk_build_nsp.setCursor(Qt.CursorShape.PointingHandCursor)
         self.chk_build_nsp.setVisible(False)
         if hasattr(self, "config"):
-            self.chk_build_nsp.setChecked(self.config.get("build_nsp", False))
+            self.chk_build_nsp.setChecked(bool(self.config.get("build_nsp", False)))
             
         self.scroll_layout.addWidget(self.chk_build_nsp)
         self.scroll_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -252,6 +305,7 @@ class UiTabsMixin:
         
         self.console = QPlainTextEdit()
         self.console.setReadOnly(True)
+        self.console.setUndoRedoEnabled(False)
         self.console.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth) 
         self.console.setWordWrapMode(QTextOption.WrapMode.WrapAnywhere)
         self.console.document().setMaximumBlockCount(1000)

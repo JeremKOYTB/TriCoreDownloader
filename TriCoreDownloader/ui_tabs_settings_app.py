@@ -1,8 +1,12 @@
 import os
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
-                             QLabel, QPushButton, QComboBox, QFrame, 
-                             QCheckBox, QSizePolicy, QSlider, QStyle)
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
+    QLabel, QPushButton, QFrame, 
+    QCheckBox, QSizePolicy, QSlider, QStyle
+)
+from PyQt6.QtCore import Qt, QSize, QTimer
+from .custom_widgets import CustomConsoleSelector
+from .config import save_config
 
 class UiTabsSettingsAppMixin:
     def setup_app_section(self, layout):
@@ -13,24 +17,28 @@ class UiTabsSettingsAppMixin:
         row1.addStretch() 
         
         self.lbl_lang = QLabel(self.T("lbl_lang"))
-        self.combo_lang = QComboBox()
+        self.combo_lang = CustomConsoleSelector()
+        self.combo_lang.setFixedWidth(160)
+        self.lang_codes = []
         
         try:
             from .Languages.locales import STRINGS
             self.combo_lang.blockSignals(True)
             
-            for lang_code, lang_dict in STRINGS.items():
-                display_name = lang_dict.get("LanguageName", lang_code.upper())
-                self.combo_lang.addItem(display_name, userData=lang_code)
+            if isinstance(STRINGS, dict):
+                for lang_code, lang_dict in STRINGS.items():
+                    display_name = lang_dict.get("LanguageName", str(lang_code).upper()) if isinstance(lang_dict, dict) else str(lang_code).upper()
+                    code_str = str(lang_code).strip().upper()
+                    self.combo_lang.addItem(display_name, code_str)
+                    self.lang_codes.append(code_str)
                 
-            saved_lang = self.config.get("lang", "en")
-            index = self.combo_lang.findData(saved_lang)
-            if index >= 0:
-                self.combo_lang.setCurrentIndex(index)
-                
+            saved_lang = str(self.config.get("lang", "EN")).strip().upper()
+            matching_idx = self.lang_codes.index(saved_lang) if saved_lang in self.lang_codes else 0
+            self.combo_lang.setCurrentIndex(matching_idx)
             self.combo_lang.blockSignals(False)
-        except ImportError:
-            self.combo_lang.addItem(self.T("msg_no_lang"), userData="en")
+        except Exception:
+            self.combo_lang.addItem(self.T("msg_no_lang"), "EN")
+            self.lang_codes = ["EN"]
             
         self.combo_lang.currentIndexChanged.connect(self._on_lang_changed)
         
@@ -39,12 +47,18 @@ class UiTabsSettingsAppMixin:
         row1.addSpacing(24) 
         
         self.lbl_theme = QLabel(self.T("lbl_theme"))
-        self.combo_theme = QComboBox()
+        self.combo_theme = CustomConsoleSelector()
+        self.combo_theme.setFixedWidth(160)
+        
+        self.combo_theme.blockSignals(True)
         theme_items = [self.T("theme_auto"), self.T("theme_light"), self.T("theme_dark"), self.T("theme_oled")]
-        self.combo_theme.addItems(theme_items)
+        for item in theme_items:
+            self.combo_theme.addItem(item)
         theme_map = {"auto": 0, "light": 1, "dark": 2, "oled": 3}
-        self.combo_theme.setCurrentIndex(theme_map.get(self.config.get("theme", "auto"), 0))
-        self.combo_theme.currentIndexChanged.connect(self.trigger_auto_save)
+        self.combo_theme.setCurrentIndex(theme_map.get(str(self.config.get("theme", "auto")).lower(), 0))
+        self.combo_theme.blockSignals(False)
+        
+        self.combo_theme.currentIndexChanged.connect(self._on_theme_changed)
         
         row1.addWidget(self.lbl_theme)
         row1.addWidget(self.combo_theme)
@@ -53,6 +67,7 @@ class UiTabsSettingsAppMixin:
         self.lbl_color = QLabel(self.T("lbl_color"))
         self.btn_color = QPushButton()
         self.btn_color.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_color.setMinimumHeight(34)
         if hasattr(self, "pick_color"): 
             self.btn_color.clicked.connect(self.pick_color)
             
@@ -76,39 +91,39 @@ class UiTabsSettingsAppMixin:
         app_layout.addSpacing(24)
         
         self.chk_rainbow = QCheckBox()
-        self.cont_rainbow, _ = self.create_wrapped_checkbox(self.chk_rainbow, self.T("chk_rainbow"))
-        self.chk_rainbow.setChecked(self.config.get("rainbow_mode", False))
-        if hasattr(self, "on_rainbow_toggle"):
+        self.cont_rainbow, self.lbl_chk_rainbow = self.create_wrapped_checkbox(self.chk_rainbow, self.T("chk_rainbow"))
+        self.chk_rainbow.setChecked(bool(self.config.get("rainbow_mode", False)))
+        if hasattr(self, "on_rainbow_toggle"): 
             self.chk_rainbow.toggled.connect(self.on_rainbow_toggle)
 
         self.chk_adv_mode = QCheckBox()
-        self.cont_adv_mode, _ = self.create_wrapped_checkbox(self.chk_adv_mode, self.T("chk_adv_mode"))
-        self.chk_adv_mode.setChecked(self.config.get("advanced_mode", False))
-        if hasattr(self, "on_adv_mode_toggle"):
+        self.cont_adv_mode, self.lbl_chk_adv_mode = self.create_wrapped_checkbox(self.chk_adv_mode, self.T("chk_adv_mode"))
+        self.chk_adv_mode.setChecked(bool(self.config.get("advanced_mode", False)))
+        if hasattr(self, "on_adv_mode_toggle"): 
             self.chk_adv_mode.toggled.connect(self.on_adv_mode_toggle)
 
         self.chk_resize = QCheckBox()
-        self.cont_resize, _ = self.create_wrapped_checkbox(self.chk_resize, self.T("chk_resize"))
-        self.chk_resize.setChecked(self.config.get("allow_resize", False)) 
+        self.cont_resize, self.lbl_chk_resize = self.create_wrapped_checkbox(self.chk_resize, self.T("chk_resize"))
+        self.chk_resize.setChecked(bool(self.config.get("allow_resize", False))) 
         self.chk_resize.toggled.connect(self.trigger_auto_save)
         
         self.chk_adv_logs = QCheckBox()
-        self.cont_adv_logs, _ = self.create_wrapped_checkbox(self.chk_adv_logs, self.T("chk_adv_logs"))
-        self.chk_adv_logs.setChecked(self.config.get("advanced_logs", False))
-        if hasattr(self, "on_adv_logs_toggle"):
+        self.cont_adv_logs, self.lbl_chk_adv_logs = self.create_wrapped_checkbox(self.chk_adv_logs, self.T("chk_adv_logs"))
+        self.chk_adv_logs.setChecked(bool(self.config.get("advanced_logs", False)))
+        if hasattr(self, "on_adv_logs_toggle"): 
             self.chk_adv_logs.toggled.connect(self.on_adv_logs_toggle)
             
         self.chk_exfat = QCheckBox()
-        self.cont_exfat, _ = self.create_wrapped_checkbox(self.chk_exfat, self.T("chk_exfat"))
-        self.chk_exfat.setChecked(self.config.get("exclude_exfat", False))
-        if hasattr(self, "on_exfat_toggle"):
+        self.cont_exfat, self.lbl_chk_exfat = self.create_wrapped_checkbox(self.chk_exfat, self.T("chk_exfat"))
+        self.chk_exfat.setChecked(bool(self.config.get("exclude_exfat", False)))
+        if hasattr(self, "on_exfat_toggle"): 
             self.chk_exfat.toggled.connect(self.on_exfat_toggle)
         self.chk_exfat.toggled.connect(self.trigger_auto_save)
         
         self.chk_hide_warn = QCheckBox()
-        self.cont_hide_warn, _ = self.create_wrapped_checkbox(self.chk_hide_warn, self.T("chk_hide_warn"))
-        self.chk_hide_warn.setChecked(self.config.get("hide_privacy_warning", False))
-        if hasattr(self, "on_hide_warn_toggle"):
+        self.cont_hide_warn, self.lbl_chk_hide_warn = self.create_wrapped_checkbox(self.chk_hide_warn, self.T("chk_hide_warn"))
+        self.chk_hide_warn.setChecked(bool(self.config.get("hide_privacy_warning", False)))
+        if hasattr(self, "on_hide_warn_toggle"): 
             self.chk_hide_warn.toggled.connect(self.on_hide_warn_toggle)
 
         for container in [self.cont_rainbow, self.cont_adv_mode, self.cont_resize, self.cont_adv_logs, self.cont_exfat, self.cont_hide_warn]:
@@ -181,6 +196,7 @@ class UiTabsSettingsAppMixin:
         r, c = 0, 0
         for key, label in targets_def.items():
             cb = QCheckBox(label)
+            cb.setCursor(Qt.CursorShape.PointingHandCursor)
             cb.setStyleSheet("color: #8A8A95; font-size: 9pt;") 
             cb.setChecked(rt_cfg.get(key, True if key not in ["text", "inputs", "console"] else False))
             
@@ -204,8 +220,9 @@ class UiTabsSettingsAppMixin:
         self.lbl_speed_text.setStyleSheet("color: #8A8A95; font-size: 9pt;") 
         
         self.slider_speed = QSlider(Qt.Orientation.Horizontal)
+        self.slider_speed.setCursor(Qt.CursorShape.PointingHandCursor)
         self.slider_speed.setRange(1, 6) 
-        self.slider_speed.setValue(self.config.get("rainbow_speed", 2))
+        self.slider_speed.setValue(int(self.config.get("rainbow_speed", 2)))
         
         self.lbl_speed_pct = QLabel()
         self.lbl_speed_pct.setStyleSheet("color: #8A8A95; font-weight: bold; font-size: 9pt;") 
@@ -215,6 +232,7 @@ class UiTabsSettingsAppMixin:
         def update_speed_label(val):
             pct = int((val / 6.0) * 100)
             self.lbl_speed_pct.setText(f"{pct}%")
+            self.config["rainbow_speed"] = val
             
         self.slider_speed.valueChanged.connect(update_speed_label)
         update_speed_label(self.slider_speed.value())
@@ -238,6 +256,7 @@ class UiTabsSettingsAppMixin:
         core_vbox.addWidget(self.rainbow_options_widget)
 
         self.adv_drawer = QWidget()
+        self.adv_options_widget = self.adv_drawer
         adv_layout = QVBoxLayout(self.adv_drawer)
         adv_layout.setContentsMargins(0, 0, 0, 0)
         
@@ -263,11 +282,15 @@ class UiTabsSettingsAppMixin:
         adv_center.addStretch()
         adv_layout.addLayout(adv_center)
         
+        self.adv_drawer.setVisible(self.chk_adv_mode.isChecked())
+        self.chk_adv_mode.toggled.connect(self.adv_drawer.setVisible)
+        
         core_vbox.addWidget(self.adv_drawer)
         app_layout.addLayout(core_vbox)
 
         self.btn_reset_center = QPushButton(self.T("btn_reset"))
         self.btn_reset_center.setObjectName("btnReset")
+        self.btn_reset_center.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_reset_center.setMinimumWidth(250)
         if hasattr(self, "reset_config"): 
             self.btn_reset_center.clicked.connect(self.reset_config)
@@ -281,34 +304,61 @@ class UiTabsSettingsAppMixin:
         
         layout.addWidget(self.grp_app)
         
-        self.chk_adv_mode.toggled.connect(self._update_settings_ui)
+        if hasattr(self, "_update_settings_ui"):
+            self.chk_adv_mode.toggled.connect(self._update_settings_ui)
+            self.chk_adv_logs.toggled.connect(self._update_settings_ui)
+            if hasattr(self, 'chk_use_aria2c'):
+                self.chk_use_aria2c.toggled.connect(self._update_settings_ui)
         self.chk_adv_mode.toggled.connect(self._update_cafe_adv_ui)
-        self.chk_adv_logs.toggled.connect(self._update_settings_ui)
-        if hasattr(self, 'chk_use_aria2c'):
-            self.chk_use_aria2c.toggled.connect(self._update_settings_ui)
+
+    def _on_theme_changed(self, index):
+        theme_list = ["auto", "light", "dark", "oled"]
+        if 0 <= index < len(theme_list):
+            self.config["theme"] = theme_list[index]
+            save_config(self.config)
+            if hasattr(self, "apply_console_theme_colors"):
+                self.apply_console_theme_colors()
 
     def _update_cafe_adv_ui(self, *args):
         adv_on = getattr(self, "chk_adv_mode", None)
-        adv_checked = adv_on.isChecked() if adv_on else self.config.get("advanced_mode", False)
-        saved_adv = self.config.get("advanced_mode", False)
+        adv_checked = adv_on.isChecked() if adv_on else bool(self.config.get("advanced_mode", False))
+        saved_adv = bool(self.config.get("advanced_mode", False))
         
         auto_save_on = getattr(self, "chk_auto_save", None)
-        is_auto_save = auto_save_on.isChecked() if auto_save_on else self.config.get("auto_save", False)
+        is_auto_save = auto_save_on.isChecked() if auto_save_on else bool(self.config.get("auto_save", False))
         
         effective_adv = adv_checked if is_auto_save else saved_adv
             
         if hasattr(self, "radio_manual") and hasattr(self, "radio_latest"):
-            if hasattr(self, "current_console") and self.current_console == "NX":
+            current_mode = getattr(self, "current_console", "NX")
+            if current_mode == "NX":
+                if hasattr(self, "radio_list"):
+                    self.radio_list.setVisible(effective_adv)
+                    if hasattr(self, "list_input_container"):
+                        self.list_input_container.setVisible(effective_adv and self.radio_list.isChecked())
+                    if not effective_adv and self.radio_list.isChecked():
+                        self.radio_latest.setChecked(True)
                 self.radio_manual.setVisible(effective_adv)
                 if not effective_adv and self.radio_manual.isChecked():
                     self.radio_latest.setChecked(True)
                     if hasattr(self, "input_manual"):
                         self.input_manual.setVisible(False)
+            else:
+                if hasattr(self, "radio_list"):
+                    self.radio_list.setVisible(False)
+                    if hasattr(self, "list_input_container"):
+                        self.list_input_container.setVisible(False)
+                    if self.radio_list.isChecked():
+                        self.radio_latest.setChecked(True)
+                if hasattr(self, "radio_manual"):
+                    self.radio_manual.setVisible(effective_adv)
+                    if not effective_adv and self.radio_manual.isChecked():
+                        self.radio_latest.setChecked(True)
 
         if hasattr(self, "cont_cafe_extract"): 
             self.cont_cafe_extract.setVisible(effective_adv)
             
-        if hasattr(self, "cont_cemu_layout"):
+        if hasattr(self, "cont_cemu_layout"): 
             extract_checked = getattr(self, "chk_cafe_extract", None)
             is_extract = extract_checked.isChecked() if extract_checked else False
             
@@ -319,7 +369,7 @@ class UiTabsSettingsAppMixin:
                 self.chk_cemu_layout.blockSignals(False)
                 
             self.cont_cemu_layout.setVisible(effective_adv and is_extract)
-            
+
         if not effective_adv:
             if hasattr(self, "chk_cafe_extract") and is_auto_save: 
                 self.chk_cafe_extract.setChecked(False)
@@ -327,9 +377,21 @@ class UiTabsSettingsAppMixin:
                 self.chk_cemu_layout.setChecked(False)
 
     def _on_lang_changed(self, index):
-        new_lang = self.combo_lang.itemData(index)
+        new_lang = None
+        if hasattr(self, "combo_lang"):
+            new_lang = self.combo_lang.itemData(index)
+        if not new_lang and hasattr(self, "lang_codes") and 0 <= index < len(self.lang_codes):
+            new_lang = self.lang_codes[index]
+            
         if new_lang:
-            self.config["lang"] = new_lang
-            self.trigger_auto_save()
+            self.config["lang"] = str(new_lang).strip().upper()
+            save_config(self.config)
+            
+            if hasattr(self, "reload_locales"):
+                self.reload_locales()
+                
+            if hasattr(self, "trigger_auto_save"):
+                self.trigger_auto_save()
+                
             if hasattr(self, "retranslate_ui"):
-                self.retranslate_ui()
+                QTimer.singleShot(50, self.retranslate_ui)

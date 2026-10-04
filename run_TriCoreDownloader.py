@@ -7,6 +7,7 @@ import traceback
 import logging
 import locale
 from datetime import datetime
+import platform
 import ssl
 
 ssl._create_default_https_context = ssl._create_unverified_context
@@ -23,6 +24,13 @@ def _setup_logging_mode():
     advanced_logs = False
     appdata_path = os.environ.get('APPDATA')
     
+    # Gestion du chemin de config multiplateforme (macOS/Linux utilisent ~/.config ou home)
+    if not appdata_path:
+        if platform.system() == "Darwin":
+            appdata_path = os.path.expanduser('~/Library/Application Support')
+        else:
+            appdata_path = os.path.expanduser('~/.config')
+
     if appdata_path:
         config_path = Path(appdata_path) / "TriCoreDownloader" / "config.json"
         if config_path.exists():
@@ -45,7 +53,6 @@ _setup_logging_mode()
 # =====================================================================
 SYS_LANG = ""
 try:
-    # Safe multi-tiered locale fallback tracking strategy for Windows environments
     if os.name == 'nt':
         import ctypes
         lang_id = ctypes.windll.kernel32.GetUserDefaultUILanguage()
@@ -108,6 +115,11 @@ def set_console_visibility(show=False):
 
 def crash_handler(exc_type, exc_value, exc_tb):
     """Global exception hook restoring console standard output on crash."""
+    # Laisser s'échapper proprement les interruptions utilisateur (Ctrl+C) et sorties système
+    if issubclass(exc_type, (KeyboardInterrupt, SystemExit)):
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+        return
+
     sys.stdout = sys.__stdout__
     sys.stderr = sys.__stderr__
     
@@ -119,14 +131,21 @@ def crash_handler(exc_type, exc_value, exc_tb):
     print("=" * 70)
     traceback.print_exception(exc_type, exc_value, exc_tb)
     print("=" * 70)
-    input(f"\n{lang_dict['PRESS_ENTER']}")
+    
+    # Sur macOS/Linux, évite de bloquer si l'environnement n'a pas de TTY interactif complet
+    if sys.stdin.isatty():
+        try:
+            input(f"\n{lang_dict['PRESS_ENTER']}")
+        except Exception:
+            pass
+            
     sys.exit(1)
 
 sys.excepthook = crash_handler
 logger.info(lang_dict["STARTING"])
 
 # =====================================================================
-# ENV PATCHES & DEPENDENCIES
+# ENV PATCHES & DEPENDENCIES (MACOS / LINUX AUTO-BYPASS)
 # =====================================================================
 try:
     import netifaces2 as netifaces
@@ -137,7 +156,17 @@ except ImportError as e:
 
 try:
     from TriCoreDownloader.dependencies import check_dependencies
-    check_dependencies()
+    
+    # Si nous sommes sur macOS ou Linux, on active le mode automatique pour éviter les inputs bloquants
+    if platform.system() in ["Darwin", "Linux"]:
+        try:
+            check_dependencies(auto_install=True)
+        except TypeError:
+            # Rétrocompatibilité si check_dependencies ne prend pas d'argument
+            check_dependencies()
+    else:
+        check_dependencies()
+        
     logger.info(lang_dict["DEP_OK"])
 except Exception as e:
     logger.error(f"LOG_ERR_DEP_VERIFICATION_FAILED: {e}")

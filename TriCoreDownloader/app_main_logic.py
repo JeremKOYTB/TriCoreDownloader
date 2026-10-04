@@ -33,6 +33,9 @@ from .app_ui_interactions import UiInteractionsMixin
 
 sys.excepthook = exception_hook
 
+RE_DIGITS = re.compile(r'\d+')
+RE_MARKDOWN_NL = re.compile(r'(?<!\n)\n(?!\n)')
+
 class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
     sigint_caught = pyqtSignal()
 
@@ -45,12 +48,12 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
 
         super().__init__(config_data)
         
-        appdata_dir = os.path.join(os.environ.get("APPDATA", ""), "TriCoreDownloader")
+        appdata_dir = str(APPDATA_DIR)
         self.keys_dir = os.path.join(appdata_dir, "temp_keys")
         
         self.perform_security_cleanup()
         
-        self.is_rainbow_active = self.config.get("rainbow_mode", False) or tampered_rainbow
+        self.is_rainbow_active = bool(self.config.get("rainbow_mode", False) or tampered_rainbow)
         
         self.audio = AudioManager(self, self.config)
         if not self.config.get("first_launch", True):
@@ -70,6 +73,7 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
         self.updater_spinner_timer = QTimer(self)
         self.updater_spinner_timer.timeout.connect(self.update_update_spinner)
         self.is_auto_check = False
+        self._is_checking_update = False
 
         if hasattr(self, "console_selector") and self.console_selector.parentWidget():
             header_layout = self.console_selector.parentWidget().layout()
@@ -106,12 +110,13 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
                 else:
                     header_layout.addWidget(self.update_container)
         
-        self.radio_mlc.toggled.connect(self.on_cafe_options_changed)
-        self.radio_slc.toggled.connect(self.on_cafe_options_changed)
-        self.radio_both.toggled.connect(self.on_cafe_options_changed)
-        self.radio_eur.toggled.connect(self.on_cafe_options_changed)
-        self.radio_usa.toggled.connect(self.on_cafe_options_changed)
-        self.radio_jpn.toggled.connect(self.on_cafe_options_changed)
+        if hasattr(self, "radio_mlc"):
+            self.radio_mlc.toggled.connect(self.on_cafe_options_changed)
+            self.radio_slc.toggled.connect(self.on_cafe_options_changed)
+            self.radio_both.toggled.connect(self.on_cafe_options_changed)
+            self.radio_eur.toggled.connect(self.on_cafe_options_changed)
+            self.radio_usa.toggled.connect(self.on_cafe_options_changed)
+            self.radio_jpn.toggled.connect(self.on_cafe_options_changed)
         
         if hasattr(self, "radio_ctr_eur"):
             self.radio_ctr_eur.toggled.connect(self.on_ctr_options_changed)
@@ -177,15 +182,17 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
         self.show()
         
         def safe_cleanup():
-            save_config(self.config)
-            self.perform_security_cleanup()
+            if not getattr(self, "_is_restarting", False):
+                save_config(self.config)
+                self.perform_security_cleanup()
             
         atexit.register(safe_cleanup)
         
         def crash_handler(exc_type, exc_value, exc_traceback):
-            save_config(self.config)
-            self.perform_security_cleanup()
-            self.handle_fatal_crash(exc_type, exc_value, exc_traceback)
+            if not getattr(self, "_is_restarting", False):
+                save_config(self.config)
+                self.perform_security_cleanup()
+                self.handle_fatal_crash(exc_type, exc_value, exc_traceback)
             
         sys.excepthook = crash_handler
         
@@ -205,7 +212,6 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
             QTimer.singleShot(200, self.show_easter_egg)
             
         QTimer.singleShot(100, self.show_eula_if_needed)
-        QTimer.singleShot(500, lambda: self.start_update_check(auto=True) if self.current_console != "WELCOME" else None)
         
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setRange(0, 100)
@@ -234,11 +240,12 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
 
             pm_vol = QPixmap()
             pm_vol.loadFromData(QByteArray(svg_data), "SVG")
-            painter = QPainter(pm_vol)
-            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-            painter.fillRect(pm_vol.rect(), QColor(text_color))
-            painter.end()
-            self.lbl_vol_icon.setPixmap(pm_vol.scaled(20, 20, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            if not pm_vol.isNull():
+                painter = QPainter(pm_vol)
+                painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+                painter.fillRect(pm_vol.rect(), QColor(text_color))
+                painter.end()
+                self.lbl_vol_icon.setPixmap(pm_vol.scaled(20, 20, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
 
         self._update_vol_icon = update_main_vol_icon
         self._update_vol_icon(self.volume_slider.value())
@@ -246,20 +253,17 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
         self._pre_mute_main_vol = self.volume_slider.value() if self.volume_slider.value() > 0 else 50
         
         def toggle_main_mute(event):
-            if self.volume_slider.value() > 0:
-                self._pre_mute_main_vol = self.volume_slider.value()
-                self.volume_slider.setValue(0)
-            else:
-                self.volume_slider.setValue(self._pre_mute_main_vol if self._pre_mute_main_vol > 0 else 50)
+            if event.button() == Qt.MouseButton.LeftButton:
+                if self.volume_slider.value() > 0:
+                    self._pre_mute_main_vol = self.volume_slider.value()
+                    self.volume_slider.setValue(0)
+                else:
+                    self.volume_slider.setValue(self._pre_mute_main_vol if self._pre_mute_main_vol > 0 else 50)
+                event.accept()
                 
         self.lbl_vol_icon.mousePressEvent = toggle_main_mute
 
-        def on_main_vol_changed(val):
-            self.config["volume"] = val
-            self._update_vol_icon(val)
-
         self.volume_slider.valueChanged.connect(self.on_volume_changed)
-        self.volume_slider.valueChanged.connect(on_main_vol_changed)
         self.volume_slider.sliderReleased.connect(
             lambda: self._play_volume_test_sound() if hasattr(self, "_play_volume_test_sound") else None
         )
@@ -278,8 +282,6 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
                 
         self.spinner_timer = QTimer(self)
         self.spinner_timer.timeout.connect(self._step_spinner)
-        self.spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-        self.spinner_idx = 0
         self.symbol_reset_timer = QTimer(self)
         self.symbol_reset_timer.setSingleShot(True)
         self.symbol_reset_timer.timeout.connect(self.update_dl_mode_label)
@@ -326,7 +328,7 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
             except Exception:
                 pass
                 
-        appdata_dir = os.path.join(os.environ.get("APPDATA", ""), "TriCoreDownloader")
+        appdata_dir = str(APPDATA_DIR)
         temp_updater_path = os.path.join(appdata_dir, "TempUpdater.py")
         if os.path.exists(temp_updater_path):
             try:
@@ -362,7 +364,7 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
         if not text:
             return ""
         text_normalized = text.replace("\r\n", "\n")
-        return re.sub(r'(?<!\n)\n(?!\n)', '\n\n', text_normalized)
+        return RE_MARKDOWN_NL.sub('\n\n', text_normalized)
 
     def _get_changelog_from_tag(self, releases, version_tag):
         for rel in releases:
@@ -372,8 +374,8 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
 
     def _get_api_error_message(self, json_payload):
         try:
-            data = json.loads(json_payload)
-            if isinstance(data, dict) and "message" in data and "documentation_url" in data:
+            data = json.loads(json_payload) if isinstance(json_payload, str) else json_payload
+            if isinstance(data, dict) and "message" in data:
                 return data["message"]
         except Exception:
             pass
@@ -387,6 +389,9 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
     def start_update_check(self, auto=False, *args):
         if self.current_console == "WELCOME":
             return
+        if self._is_checking_update:
+            return
+        self._is_checking_update = True
             
         self.pulse_anim.stop()
         self.opacity_effect.setOpacity(1.0)
@@ -404,6 +409,12 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
         self.update_thread.start()
 
     def handle_update_check_result(self, latest_stable, latest_prerelease, json_payload, is_target_prerelease, error_msg):
+        if getattr(self, "_eula_active", False):
+            QTimer.singleShot(300, lambda: self.handle_update_check_result(latest_stable, latest_prerelease, json_payload, is_target_prerelease, error_msg))
+            return
+
+        self._is_checking_update = False
+
         if hasattr(self, "updater_spinner_timer"): self.updater_spinner_timer.stop()
         if hasattr(self, "lbl_update_spinner"): self.lbl_update_spinner.setText("")
         if hasattr(self, "btn_update"): self.btn_update.setEnabled(True)
@@ -417,9 +428,28 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
         api_error = self._get_api_error_message(json_payload) if not error_msg else error_msg
         
         if api_error:
+            is_403 = False
+            if "403" in str(api_error) or "rate limit" in str(api_error).lower():
+                is_403 = True
+            elif json_payload:
+                try:
+                    data = json.loads(json_payload) if isinstance(json_payload, str) else json_payload
+                    if isinstance(data, dict):
+                        msg_val = str(data.get("message", "")).lower()
+                        if "rate limit" in msg_val or "403" in msg_val:
+                            is_403 = True
+                except Exception:
+                    pass
+
+            err_display = "❌ 403" if is_403 else "❌ "
             if hasattr(self, "lbl_update_spinner"): 
-                self.lbl_update_spinner.setText("❌ ")
-                QTimer.singleShot(5000, lambda: self.lbl_update_spinner.setText(""))
+                self.lbl_update_spinner.setText(err_display)
+                if hasattr(self, "pulse_anim"):
+                    self.pulse_anim.stop()
+                if hasattr(self, "opacity_effect"):
+                    self.opacity_effect.setOpacity(1.0)
+                QTimer.singleShot(6000, lambda: self.lbl_update_spinner.setText("") if self.lbl_update_spinner.text() == err_display else None)
+
             if not self.is_auto_check:
                 msg_box = QMessageBox(self)
                 msg_box.setWindowIcon(self.get_app_icon())
@@ -436,7 +466,7 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
 
         try:
             def parse_ver(v_str):
-                return [int(x) for x in re.findall(r'\d+', str(v_str))]
+                return [int(x) for x in RE_DIGITS.findall(str(v_str))]
             current_parsed = parse_ver(self.app_version)
             stable_parsed = parse_ver(latest_stable)
             
@@ -532,21 +562,10 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
             html_changelog = self._convert_markdown_to_html(stable_changelog)
             browser.setMarkdown(html_changelog)
             
-            tmp_dir = QDir.tempPath() + "/TriCore_SVGs"
-            QDir().mkpath(tmp_dir)
-            
-            def create_svg_file(name, color, is_up):
-                path = tmp_dir + "/" + name
-                pts = "18 15 12 9 6 15" if is_up else "6 9 12 15 18 9"
-                content = f"""<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="{pts}"/></svg>"""
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(content)
-                return path
-
-            up_idle_path = create_svg_file("up_idle.svg", "#8A8A95", True)
-            up_hover_path = create_svg_file("up_hover.svg", "#FFFFFF", True)
-            down_idle_path = create_svg_file("down_idle.svg", "#8A8A95", False)
-            down_hover_path = create_svg_file("down_hover.svg", "#FFFFFF", False)
+            up_idle = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238A8A95' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='18 15 12 9 6 15'/></svg>"
+            up_hover = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23FFFFFF' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='18 15 12 9 6 15'/></svg>"
+            down_idle = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238A8A95' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>"
+            down_hover = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23FFFFFF' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>"
 
             browser.setStyleSheet("""
                 QTextEdit {
@@ -606,20 +625,20 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
                         background: {current_hex};
                     }}
                     QScrollBar::up-arrow:vertical {{
-                        image: url("{up_idle_path}");
+                        image: url("{up_idle}");
                         width: 14px;
                         height: 14px;
                     }}
                     QScrollBar::down-arrow:vertical {{
-                        image: url("{down_idle_path}");
+                        image: url("{down_idle}");
                         width: 14px;
                         height: 14px;
                     }}
                     QScrollBar::up-arrow:vertical:hover, QScrollBar::up-arrow:vertical:pressed {{
-                        image: url("{up_hover_path}");
+                        image: url("{up_hover}");
                     }}
                     QScrollBar::down-arrow:vertical:hover, QScrollBar::down-arrow:vertical:pressed {{
-                        image: url("{down_hover_path}");
+                        image: url("{down_hover}");
                     }}
                     QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
                         background: none;
@@ -707,11 +726,15 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
                 if confirm_box.exec() != QMessageBox.StandardButton.Yes:
                     return
 
-            updater_script = os.path.join(os.getcwd(), "Updater.py")
+            base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+            updater_script = os.path.join(base_dir, "Updater.py")
+            if not os.path.exists(updater_script):
+                updater_script = os.path.join(os.getcwd(), "Updater.py")
+
             if os.path.exists(updater_script):
                 dialog.accept()
                 
-                appdata_dir = os.path.join(os.environ.get("APPDATA", ""), "TriCoreDownloader")
+                appdata_dir = str(APPDATA_DIR)
                 os.makedirs(appdata_dir, exist_ok=True)
                 temp_updater = os.path.join(appdata_dir, "TempUpdater.py")
                 
@@ -723,7 +746,7 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
                             break
                         time.sleep(0.05)
                         
-                    args = [sys.executable, temp_updater, "--install-dir", os.getcwd()]
+                    args = [sys.executable, temp_updater, "--install-dir", base_dir]
                     if target_mode == "all": args.append("--view-all")
                     elif target_mode == "stable" and is_strictly_equal: args.append("--reinstall")
                     elif target_mode == "prerelease": args.append("--prerelease")
@@ -735,6 +758,8 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
                     }
                     if os.name == 'nt':
                         kwargs['creationflags'] = 0x00000008 | 0x00000200
+                    else:
+                        kwargs['start_new_session'] = True
                         
                     proc = subprocess.Popen(args, **kwargs)
                     time.sleep(0.4)
@@ -744,7 +769,7 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
                     plan_a_success = False
                     
                 if not plan_a_success:
-                    args = [sys.executable, updater_script, "--install-dir", os.getcwd()]
+                    args = [sys.executable, updater_script, "--install-dir", base_dir]
                     if target_mode == "all": args.append("--view-all")
                     elif target_mode == "stable" and is_strictly_equal: args.append("--reinstall")
                     elif target_mode == "prerelease": args.append("--prerelease")
@@ -756,10 +781,11 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
                     }
                     if os.name == 'nt':
                         kwargs['creationflags'] = 0x00000008 | 0x00000200
+                    else:
+                        kwargs['start_new_session'] = True
                     subprocess.Popen(args, **kwargs)
                     
                 QApplication.quit()
-                sys.exit(0)
             else:
                 crit_box = QMessageBox(dialog)
                 crit_box.setWindowIcon(self.get_app_icon())
@@ -809,16 +835,23 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
             self.close()
 
     def closeEvent(self, event):
-        if getattr(self, "worker", None) is not None and self.worker.isRunning():
+        if getattr(self, "worker", None) is not None and self.worker.isRunning() and not getattr(self, "_is_restarting", False):
             msg_box = QMessageBox(self)
             msg_box.setWindowIcon(self.get_app_icon())
             msg_box.setIcon(QMessageBox.Icon.Information)
-            msg_box.setWindowTitle(self.T("close_blocked_title") if hasattr(self, "T") else "")
-            msg_box.setText(self.T("close_blocked_msg") if hasattr(self, "T") else "")
+            msg_box.setWindowTitle(self.T("close_blocked_title") if hasattr(self, "T") else "Action bloquée")
+            msg_box.setText(self.T("close_blocked_msg") if hasattr(self, "T") else "L'application travaille, vous ne pouvez pas quitter maintenant.")
+            msg_box.exec()
             event.ignore()
         else:
-            save_config(self.config)
-            self.perform_security_cleanup()
+            if not getattr(self, "_is_restarting", False):
+                save_config(self.config)
+                self.perform_security_cleanup()
+            if hasattr(self, "app_lock") and self.app_lock.isLocked():
+                try:
+                    self.app_lock.unlock()
+                except Exception:
+                    pass
             event.accept()
 
 class UpdateCheckerThread(QThread):
@@ -860,7 +893,7 @@ class UpdateCheckerThread(QThread):
 
             if latest_prerelease:
                 def parse_ver(v_str):
-                    return [int(x) for x in re.findall(r'\d+', str(v_str))]
+                    return [int(x) for x in RE_DIGITS.findall(str(v_str))]
                 if not latest_stable or parse_ver(latest_prerelease) > parse_ver(latest_stable):
                     is_target_prerelease = True
 
@@ -868,6 +901,11 @@ class UpdateCheckerThread(QThread):
                 
         except urllib.error.HTTPError as he:
             err_details = f"HTTP Error {he.code}: {he.reason}"
-            self.finished_signal.emit("", "", "", False, err_details)
+            raw_body = ""
+            try:
+                raw_body = he.read().decode('utf-8', errors='ignore')
+            except Exception:
+                pass
+            self.finished_signal.emit("", "", raw_body, False, err_details)
         except Exception as e:
             self.finished_signal.emit("", "", "", False, str(e))
