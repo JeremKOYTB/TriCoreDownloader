@@ -36,6 +36,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 RE_DEVICE_ID = re.compile(r"device_id=[a-fA-F0-9]+")
 RE_DID = re.compile(r"did:[a-fA-F0-9]+")
 
+
 class DownloaderWorker(QThread, WorkerOperations):
     log_signal = pyqtSignal(str)
     log_replace_signal = pyqtSignal(str)
@@ -350,7 +351,7 @@ class DownloaderWorker(QThread, WorkerOperations):
                 "==================================================", raw=True
             )
             self.log_adv(
-                "             PRE-FLIGHT ENVIRONMENT                ", raw=True
+                "              PRE-FLIGHT ENVIRONMENT              ", raw=True
             )
             self.log_adv(
                 "==================================================\n", raw=True
@@ -392,7 +393,10 @@ class DownloaderWorker(QThread, WorkerOperations):
 
             print("[NX WORKER] Parsing prod.keys...")
             bis_key_00 = None
-            ssl_rsa_kek = None
+            bis_key_00_crypt = None
+            bis_key_00_tweak = None
+            ssl_rsa_keks = []
+
             with open(
                 self.config["prod_keys"],
                 "r",
@@ -401,17 +405,39 @@ class DownloaderWorker(QThread, WorkerOperations):
             ) as f:
                 for line in f:
                     line = line.strip()
-                    if "=" in line:
-                        k, v = line.split("=", 1)
-                        k_str, v_str = k.strip(), v.strip()
-                        if k_str == "bis_key_00":
-                            bis_key_00 = bytes.fromhex(v_str)
-                        elif k_str == "ssl_rsa_kek":
-                            ssl_rsa_kek = bytes.fromhex(v_str)
-                        if bis_key_00 and ssl_rsa_kek:
-                            break
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    k_str, v_str = k.strip().lower(), v.strip()
 
-            if not ssl_rsa_kek:
+                    if k_str in ("bis_key_00", "bis_key_0", "bis_key0"):
+                        try:
+                            bis_key_00 = bytes.fromhex(v_str)
+                        except ValueError:
+                            pass
+                    elif k_str in ("bis_key_00_crypt", "bis_key_0_crypt", "bis_key0_crypt"):
+                        try:
+                            bis_key_00_crypt = bytes.fromhex(v_str)
+                        except ValueError:
+                            pass
+                    elif k_str in ("bis_key_00_tweak", "bis_key_0_tweak", "bis_key0_tweak"):
+                        try:
+                            bis_key_00_tweak = bytes.fromhex(v_str)
+                        except ValueError:
+                            pass
+
+                    if "ssl_rsa_kek" in k_str:
+                        try:
+                            kek_bytes = bytes.fromhex(v_str)
+                            if len(kek_bytes) == 16 and kek_bytes not in ssl_rsa_keks:
+                                ssl_rsa_keks.append(kek_bytes)
+                        except ValueError:
+                            pass
+
+            if not bis_key_00 and bis_key_00_crypt and bis_key_00_tweak:
+                bis_key_00 = bis_key_00_crypt + bis_key_00_tweak
+
+            if not ssl_rsa_keks:
                 raise ValueError(
                     "Clé 'ssl_rsa_kek' absente de prod.keys (requise pour le certificat"
                     " client)."
@@ -471,7 +497,7 @@ class DownloaderWorker(QThread, WorkerOperations):
             )
 
             cert_pem, key_pem = SwitchCore.extract_client_cert_and_key(
-                decrypted_data, ssl_rsa_kek
+                decrypted_data, ssl_rsa_keks
             )
 
             self._verify_sandbox_persistence()
