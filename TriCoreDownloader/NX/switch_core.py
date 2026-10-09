@@ -32,6 +32,9 @@ class SwitchCore:
     @staticmethod
     def recover_rsa_private_key(n, e, d):
         k = d * e - 1
+        if k <= 0 or k % 2 != 0:
+            raise ValueError("Invalid d parameter for RSA key.")
+
         t = (k & -k).bit_length() - 1
         r = k >> t
 
@@ -100,23 +103,35 @@ class SwitchCore:
         iv = ssl_ext_key[:0x10]
         encrypted_d = ssl_ext_key[0x10:]
 
-        cipher = Cipher(
-            algorithms.AES(ssl_rsa_kek), modes.CTR(iv), backend=default_backend()
+        keks = ssl_rsa_kek if isinstance(ssl_rsa_kek, list) else [ssl_rsa_kek]
+        last_error = None
+
+        for kek in keks:
+            try:
+                cipher = Cipher(
+                    algorithms.AES(kek), modes.CTR(iv), backend=default_backend()
+                )
+                decryptor = cipher.decryptor()
+                decrypted_d_bytes = decryptor.update(encrypted_d) + decryptor.finalize()
+
+                d = int.from_bytes(decrypted_d_bytes, "big")
+                private_key = cls.recover_rsa_private_key(n, e, d)
+
+                clean_key = private_key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.TraditionalOpenSSL,
+                    encryption_algorithm=serialization.NoEncryption(),
+                )
+                clean_cert = cert.public_bytes(serialization.Encoding.PEM)
+
+                return clean_cert, clean_key
+            except Exception as ex:
+                last_error = ex
+                continue
+
+        raise ValueError(
+            f"Échec du déchiffrement de la clé privée client RSA avec les clés fournies ({last_error})."
         )
-        decryptor = cipher.decryptor()
-        decrypted_d_bytes = decryptor.update(encrypted_d) + decryptor.finalize()
-
-        d = int.from_bytes(decrypted_d_bytes, "big")
-        private_key = cls.recover_rsa_private_key(n, e, d)
-
-        clean_key = private_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption_algorithm=serialization.NoEncryption(),
-        )
-        clean_cert = cert.public_bytes(serialization.Encoding.PEM)
-
-        return clean_cert, clean_key
 
     @staticmethod
     def _extract_cnmt_from_pfs0(pfs0_bytes):
