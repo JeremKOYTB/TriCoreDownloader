@@ -12,85 +12,6 @@ It is designed for software preservation, enabling you to install files on eithe
 
 ---
 
-# FAQ
-
-Before contacting support or opening an issue, please read this section **carefully**:
-
-1. **Does TriCoreDownloader allow downloading games?**
-   
-**NO.** This tool is strictly reserved for downloading system updates (firmwares) from official Nintendo servers.
-It does not allow, in any capacity, the download of games or any other illegal content.
-
-2. **Does it officially support other systems than Windows 10 (20H1+) and 11?**
-   
-**NO.** Only Windows 10 (version 20H1 and newer) and Windows 11 are officially supported.
-I cannot confirm if it works on 32-bit OS versions. I strongly recommend Windows 11 for a guaranteed, trouble-free experience.
-
-However, support for Linux and macOS (in their recent versions) could be considered.
-But it will require both the desire and the time to do so.
-To speed up this process, if you are also motivated, do not hesitate to submit Pull Requests!
-
-3. **Will you support Windows XP, Vista, 7, 8, or older versions of Windows 10?**
-   
-**NO.** Supporting these systems would require major technical concessions that I cannot afford.
-If you absolutely need it to work on an older OS, you are free to attempt to create the compatibility yourself;
-if it works correctly, you are welcome to propose your ideas via a Pull Request.
-
-4. **Can I use keys found online?**
-
-**NO.** You must obligatorily use your own personal keys if you wish to download or decrypt. This is purely and simply for legal reasons.
-
-5. **Is it safe to download TriCoreDownloader from other repositories?**
-   
-**NO.** I do not recommend downloading TriCoreDownloader from anywhere other than my own repository.
-You may only do so if you are 100% sure you know the person and their intentions.
-
-6. **Does TriCoreDownloader collect my data?**
-   
-**NO.** The tool does not collect any data whatsoever. The update check strictly looks to see if your version matches the latest one. I have no way of knowing who is behind the downloads or any statistics regarding who is currently using my tool. Just check the code; it is 100% open source!
-
-7. **Is this a virus?**
-
-**NO.** If you think it is a virus, please do not download it and stop telling me that I am doing dangerous things with this script 😭.
-Once again, check the code; I have not encrypted anything or done anything else. You can see everything it does in full transparency.
-If you have any doubts, do not download it, or put it in a VM as a last resort.
-
-8. **Can TriCoreDownloader bypass 404 errors?**
-
-**NO**. It cannot bypass a 404 error. If you encounter a 404 error, it simply means the file does not exist on Nintendo's servers.
-
-Technically, a 404 response indicates that the server cannot find the requested resource.
-Because TriCoreDownloader performs a direct request to these official servers, it cannot magically retrieve content that is missing.
-
-This is specifically relevant for Wii U titles in the 1.x.x range.
-Since the YLS8 database does not record the specific version or the number of titles available for this range (1.0.0 to 1.9.9), TriCoreDownloader cannot determine the correct version.
-Consequently, to ensure the process still functions, the tool automatically defaults to downloading all titles as "v0".
-
-If you see a 404 error, it is because the file does not exist on the server. 
-Please stop sending me messages on Discord or Twitter about this; it is not a bug, but a necessary technical constraint.
-
-9. **How do I provide useful, clear, and effective feedback?**
-    
-When you notice an issue, please specify exactly what you were trying to do in the smallest details. Ensure your report is clear enough to understand.
-I have received things like:
-
-> "Wii U MLC + SLC downloader
-> Only allows you to download WUP files of that firmware
-> v0 never happening award"
-
-
-That is not really feedback. Please be clearer in your reports/issues so I can actually help.
-
-10. **Is the code reliable if it was assisted by Gemini?**
-    
-**NO.** The fact that TriCoreDownloader exists thanks to the help of Gemini does not mean it is infallible.
-I have specifically encouraged you to make Pull Requests on this subject if you wish to make the code more "human."
-Please stop telling me the code is dangerous without explaining why. Please show me the specific parts of the code that make you say it is dangerous.
-
-Without context, I cannot understand!
-
----
-
 ## ⚠️ Critical Security & Legal Warnings
 
 * **Risk of Hardware Damage:** Installing these files onto a real console carries inherent risks. Any interruption or error during the installation process can permanently break your console. I decline all responsibility for bricked consoles, lost data, or bans. You are using this utility entirely at **your own risk**.
@@ -103,7 +24,7 @@ Without context, I cannot understand!
 > [!NOTE]
 > ~~The `certificate.pem` file can be easily generated using my other project [NX-ProdToPEM](https://github.com/JeremKOYTB/NX-ProdToPEM) btw :)~~
 > 
-> Note 2: NX-ProdToPEM will soon be obsolete and archived, as I feel I could have just integrated it directly into TriCoreDownloader instead of making it a separate script. Stay tuned!
+> Note 2: NX-ProdToPEM is now obsolete and archived.
 > 
 > **Also**, error texts (or logs) generated by this tool may show your console's unique Device ID (DID). Remember to manually remove entries like `DID:` or `device_id=` before uploading your logs to the Internet.
 
@@ -294,6 +215,85 @@ The primary goal of TriCoreDownloader is software preservation. I took three sep
 If the use of AI to assist in writing this script is a concern for you or goes against your principles, I completely understand and respect your decision not to use it.
 
 My priority is to provide a useful, reliable tool for the preservation community, and I appreciate your honesty regarding this aspect of the project. 🔥
+
+---
+
+# FAQ
+
+Before contacting support or opening an issue, please read this section **carefully**:
+
+1. **Does TriCoreDownloader allow downloading games?**
+   
+**NO.** This tool is strictly reserved for downloading system updates (firmwares) from official Nintendo servers.
+It does not allow, in any capacity, the download of games or any other illegal content.
+
+2. **Does it officially support other systems than Windows 10 (20H1+) and 11?**
+   
+**NO.** Only Windows 10 (version 20H1 and newer) and Windows 11 are officially supported.
+I cannot confirm if it works on 32-bit OS versions. I strongly recommend Windows 11 for a guaranteed, trouble-free experience.
+
+However, support for Linux and macOS (in their recent versions) could be considered.
+But it will require both the desire and the time to do so.
+To speed up this process, if you are also motivated, do not hesitate to submit Pull Requests!
+
+3. **Will you support Windows XP, Vista, 7, 8, or older versions of Windows 10?**
+   
+**NO.** Supporting these systems would require major technical concessions that I cannot afford.
+If you absolutely need it to work on an older OS, you are free to attempt to create the compatibility yourself;
+if it works correctly, you are welcome to propose your ideas via a Pull Request.
+
+4. **Can I use keys found online?**
+
+**NO.** You must obligatorily use your own personal keys if you wish to download or decrypt. This is purely and simply for legal reasons.
+
+5. **Is it safe to download TriCoreDownloader from other repositories?**
+   
+**NO.** I do not recommend downloading TriCoreDownloader from anywhere other than my own repository.
+You may only do so if you are 100% sure you know the person and their intentions.
+
+6. **Does TriCoreDownloader collect my data?**
+   
+**NO.** The tool does not collect any data whatsoever. The update check strictly looks to see if your version matches the latest one. I have no way of knowing who is behind the downloads or any statistics regarding who is currently using my tool. Just check the code; it is 100% open source!
+
+7. **Is this a virus?**
+
+**NO.** If you think it is a virus, please do not download it and stop telling me that I am doing dangerous things with this script 😭.
+Once again, check the code; I have not encrypted anything or done anything else. You can see everything it does in full transparency.
+If you have any doubts, do not download it, or put it in a VM as a last resort.
+
+8. **Can TriCoreDownloader bypass 404 errors?**
+
+**NO**. It cannot bypass a 404 error. If you encounter a 404 error, it simply means the file does not exist on Nintendo's servers.
+
+Technically, a 404 response indicates that the server cannot find the requested resource.
+Because TriCoreDownloader performs a direct request to these official servers, it cannot magically retrieve content that is missing.
+
+This is specifically relevant for Wii U titles in the 1.x.x range.
+Since the YLS8 database does not record the specific version or the number of titles available for this range (1.0.0 to 1.9.9), TriCoreDownloader cannot determine the correct version.
+Consequently, to ensure the process still functions, the tool automatically defaults to downloading all titles as "v0".
+
+If you see a 404 error, it is because the file does not exist on the server. 
+Please stop sending me messages on Discord or Twitter about this; it is not a bug, but a necessary technical constraint.
+
+9. **How do I provide useful, clear, and effective feedback?**
+    
+When you notice an issue, please specify exactly what you were trying to do in the smallest details. Ensure your report is clear enough to understand.
+I have received things like:
+
+> "Wii U MLC + SLC downloader
+> Only allows you to download WUP files of that firmware
+> v0 never happening award"
+
+
+That is not really feedback. Please be clearer in your reports/issues so I can actually help.
+
+10. **Is the code reliable if it was assisted by Gemini?**
+    
+**NO.** The fact that TriCoreDownloader exists thanks to the help of Gemini does not mean it is infallible.
+I have specifically encouraged you to make Pull Requests on this subject if you wish to make the code more "human."
+Please stop telling me the code is dangerous without explaining why. Please show me the specific parts of the code that make you say it is dangerous.
+
+Without context, I cannot understand!
 
 ---
 
