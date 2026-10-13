@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <filter id="sharedForegroundShadow" x="-30%" y="-40%" width="160%" height="250%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="1.5" flood-color="#000000" flood-opacity="0.35"/>
+      <feDropShadow dx="0" dy="5" stdDeviation="3.5" flood-color="#000000" flood-opacity="0.4"/>
+      <feDropShadow dx="0" dy="10" stdDeviation="8" flood-color="#000000" flood-opacity="0.25"/>
+    </filter>
+
+    <radialGradient id="glassBody" cx="50%" cy="10%" r="90%">
+      <stop offset="0%" stop-color="#474A58"/>
+      <stop offset="45%" stop-color="#282933"/>
+      <stop offset="100%" stop-color="#14151B"/>
+    </radialGradient>
+
+    <linearGradient id="glassBorder" x1="64" y1="0" x2="64" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.4"/>
+      <stop offset="30%" stop-color="#FFFFFF" stop-opacity="0.12"/>
+      <stop offset="80%" stop-color="#000000" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.08"/>
+    </linearGradient>
+
+    <linearGradient id="glassRed" x1="64" y1="12" x2="64" y2="44" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFAEAE"/>
+      <stop offset="25%" stop-color="#FF3848"/>
+      <stop offset="80%" stop-color="#D91624"/>
+      <stop offset="100%" stop-color="#B8101E"/>
+    </linearGradient>
+
+    <linearGradient id="glassBlue" x1="64" y1="38" x2="64" y2="66" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1AC8FF"/>
+      <stop offset="20%" stop-color="#00A2F0"/>
+      <stop offset="75%" stop-color="#006CD0"/>
+      <stop offset="100%" stop-color="#004DA8"/>
+    </linearGradient>
+
+    <linearGradient id="glassPurple" x1="64" y1="58" x2="64" y2="96" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#CFACFF"/>
+      <stop offset="25%" stop-color="#B37DFF"/>
+      <stop offset="70%" stop-color="#8035DE"/>
+      <stop offset="100%" stop-color="#4F1199"/>
+    </linearGradient>
+
+    <linearGradient id="glassTray" x1="64" y1="74" x2="64" y2="110" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.95"/>
+      <stop offset="20%" stop-color="#EDF2FB" stop-opacity="0.8"/>
+      <stop offset="65%" stop-color="#CBD3E6" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#9CA5BC" stop-opacity="0.5"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="128" height="128" rx="28" fill="url(#glassBody)"/>
+  <rect x="0.5" y="0.5" width="127" height="127" rx="27.5" fill="none" stroke="url(#glassBorder)" stroke-width="1"/>
+
+  <g filter="url(#sharedForegroundShadow)">
+    <path d="M24 82 L24 98 A 8 8 0 0 0 32 106 L96 106 A 8 8 0 0 0 104 98 L104 82"
+          fill="none"
+          stroke="url(#glassTray)"
+          stroke-width="14"
+          stroke-linecap="round"
+          stroke-linejoin="round"/>
+    <path d="M64 20 L64 42" stroke="url(#glassRed)" stroke-width="16" stroke-linecap="round"/>
+    <path d="M64 42 L64 64" stroke="url(#glassBlue)" stroke-width="16" stroke-linecap="round"/>
+    <path d="M64 64 L64 86" stroke="url(#glassPurple)" stroke-width="16" stroke-linecap="round"/>
+    <path d="M38 64 L64 90 L90 64" fill="none" stroke="url(#glassPurple)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
