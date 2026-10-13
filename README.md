@@ -39,7 +39,9 @@ To keep things secure and legal, you must extract the required files yourself fr
 * The `hactool` ([hactool](https://github.com/SciresM/hactool)) executable file (by SciresM).
 * The `prod.keys` file (extracted via [Lockpick_RCM](https://github.com/THZoria/Lockpick_RCMaster) or [Lockpick_RCM_Pro](https://github.com/sthetix/Lockpick_RCM_Pro)).
 * The `PRODINFO.bin` file (a backup of your console's eMMC).
-* The `certificate.pem` file (your unique connection certificate, extracted via tools like [NX-ProdToPEM](https://github.com/JeremKOYTB/NX-ProdToPEM)).
+* ~~The `certificate.pem` file (your unique connection certificate, extracted via tools like [NX-ProdToPEM](https://github.com/JeremKOYTB/NX-ProdToPEM)).~~
+> [!NOTE]
+> The certificate file is no longer needed since version 1.0.0 of TriCoreDownloader 
 
 ### Nintendo 3DS (CTR)
 * The `boot9.bin` file (extracted via [GodMode9](https://github.com/d0k3/GodMode9), optional, but required only if you want to decrypt CIA files).
