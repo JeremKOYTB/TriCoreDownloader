@@ -679,7 +679,6 @@ def is_tricoredownloader_running(target_file=None):
 
 
 def kill_tricoredownloader_processes(target_file=None):
-    """Force fermer toutes les instances de TriCoreDownloader exécutées."""
     current_pid = os.getpid()
     parent_pid = os.getppid() if hasattr(os, "getppid") else -1
     ignored_pids = {current_pid, parent_pid}
@@ -698,7 +697,6 @@ def kill_tricoredownloader_processes(target_file=None):
             _tlog(f"taskkill failed: {e}", "WARN")
         return
 
-    # Linux & macOS
     try:
         if sys.platform.startswith("linux") and os.path.isdir("/proc"):
             for entry in os.listdir("/proc"):
