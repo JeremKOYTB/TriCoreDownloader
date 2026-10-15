@@ -981,6 +981,11 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
             clean_env.pop("_MEIPASS2", None)
             clean_env.pop("_MEIPASS", None)
             clean_env.pop("APPDIR", None)
+            clean_env.pop("OWD", None)
+            clean_env.pop("ARGV0", None)
+
+            if sys.platform.startswith("linux"):
+                clean_env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
 
             if hasattr(self, "app_lock") and self.app_lock.isLocked():
                 try:
