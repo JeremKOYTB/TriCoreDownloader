@@ -1,5 +1,6 @@
 import os
 import sys
+import stat
 import signal
 import datetime
 import subprocess
@@ -985,6 +986,14 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
             clean_env.pop("ARGV0", None)
 
             if sys.platform.startswith("linux"):
+                if "LD_LIBRARY_PATH_ORIG" in clean_env:
+                    clean_env["LD_LIBRARY_PATH"] = clean_env.pop("LD_LIBRARY_PATH_ORIG")
+                else:
+                    clean_env.pop("LD_LIBRARY_PATH", None)
+                clean_env.pop("QT_PLUGIN_PATH", None)
+                clean_env.pop("QML2_IMPORT_PATH", None)
+                clean_env.pop("PYTHONPATH", None)
+                clean_env.pop("PYTHONHOME", None)
                 clean_env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
 
             if hasattr(self, "app_lock") and self.app_lock.isLocked():
@@ -1011,6 +1020,13 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
                     base_dir = os.path.dirname(current_exe)
                     orig_target = current_exe
 
+                if sys.platform.startswith("linux"):
+                    try:
+                        st = os.stat(current_exe)
+                        os.chmod(current_exe, st.st_mode | stat.S_IEXEC | 0o755)
+                    except Exception:
+                        pass
+
                 args = [current_exe, "--updater", "--install-dir", base_dir, "--original-target", orig_target]
                 if target_mode == "all":
                     args.append("--view-all")
@@ -1030,6 +1046,62 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
                     kwargs["creationflags"] = 0x00000008 | 0x00000200
                 else:
                     kwargs["start_new_session"] = True
+                    if sys.platform.startswith("linux"):
+                        kwargs["close_fds"] = True
+
+                if sys.platform.startswith("linux"):
+                    launched_ok = False
+                    proc = None
+                    try:
+                        proc = subprocess.Popen(args, **kwargs)
+                        for _ in range(15):
+                            QApplication.processEvents()
+                            time.sleep(0.1)
+                            if proc.poll() is not None:
+                                break
+                        if proc.poll() is None and os.path.exists(f"/proc/{proc.pid}"):
+                            launched_ok = True
+                    except Exception:
+                        launched_ok = False
+
+                    if not launched_ok:
+                        try:
+                            fallback_env = clean_env.copy()
+                            fallback_env.pop("APPIMAGE_EXTRACT_AND_RUN", None)
+                            fallback_kwargs = dict(kwargs)
+                            fallback_kwargs["env"] = fallback_env
+                            proc = subprocess.Popen(args, **fallback_kwargs)
+                            for _ in range(15):
+                                QApplication.processEvents()
+                                time.sleep(0.1)
+                                if proc.poll() is not None:
+                                    break
+                            if proc.poll() is None and os.path.exists(f"/proc/{proc.pid}"):
+                                launched_ok = True
+                        except Exception:
+                            launched_ok = False
+
+                    if not launched_ok:
+                        self._is_restarting = False
+                        if hasattr(self, "app_lock"):
+                            try:
+                                self.app_lock.tryLock(100)
+                            except Exception:
+                                pass
+                        err_box = QMessageBox(self)
+                        err_box.setWindowIcon(self.get_app_icon())
+                        err_box.setIcon(QMessageBox.Icon.Critical)
+                        err_box.setWindowTitle(self.T("msg_error_title"))
+                        err_box.setText("Impossible de lancer le module de mise à jour.")
+                        err_box.exec()
+                        return
+
+                    self.hide()
+                    QApplication.processEvents()
+                    time.sleep(0.15)
+                    self.close()
+                    QApplication.quit()
+                    sys.exit(0)
 
                 subprocess.Popen(args, **kwargs)
                 self.close()
@@ -1078,11 +1150,22 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
                         kwargs["creationflags"] = 0x00000008 | 0x00000200
                     else:
                         kwargs["start_new_session"] = True
+                        if sys.platform.startswith("linux"):
+                            kwargs["close_fds"] = True
 
                     proc = subprocess.Popen(args, **kwargs)
-                    time.sleep(0.4)
-                    if proc.poll() is None:
-                        plan_a_success = True
+                    if sys.platform.startswith("linux"):
+                        for _ in range(12):
+                            QApplication.processEvents()
+                            time.sleep(0.1)
+                            if proc.poll() is not None:
+                                break
+                        if proc.poll() is None and os.path.exists(f"/proc/{proc.pid}"):
+                            plan_a_success = True
+                    else:
+                        time.sleep(0.4)
+                        if proc.poll() is None:
+                            plan_a_success = True
                 except Exception:
                     plan_a_success = False
 
@@ -1106,7 +1189,28 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
                         kwargs["creationflags"] = 0x00000008 | 0x00000200
                     else:
                         kwargs["start_new_session"] = True
-                    subprocess.Popen(args, **kwargs)
+                        if sys.platform.startswith("linux"):
+                            kwargs["close_fds"] = True
+                    proc_b = subprocess.Popen(args, **kwargs)
+                    if sys.platform.startswith("linux"):
+                        for _ in range(12):
+                            QApplication.processEvents()
+                            time.sleep(0.1)
+                            if proc_b.poll() is not None:
+                                break
+                        if proc_b.poll() is not None:
+                            self._is_restarting = False
+                            if hasattr(self, "app_lock"):
+                                try:
+                                    self.app_lock.tryLock(100)
+                                except Exception:
+                                    pass
+                            return
+
+                if sys.platform.startswith("linux"):
+                    self.hide()
+                    QApplication.processEvents()
+                    time.sleep(0.15)
 
                 self.close()
                 QApplication.quit()
