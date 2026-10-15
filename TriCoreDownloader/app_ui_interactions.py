@@ -966,7 +966,7 @@ class UiInteractionsMixin:
                         launched_ok = True
                 except Exception as e:
                     if hasattr(self, "console_write"):
-                        self.console_write(f"[ERROR] Échec du redémarrage : {e}\n")
+                        self.console_write(f"[ERROR] : {e}\n")
 
             if not launched_ok:
                 self._is_restarting = False
@@ -976,7 +976,7 @@ class UiInteractionsMixin:
                     except Exception:
                         pass
                 if hasattr(self, "console_write"):
-                    self.console_write("[ERROR] Échec du redémarrage : le nouveau processus ne s'est pas lancé.\n")
+                    self.console_write("[ERROR] Échec du redémarrage\n")
                 return
 
             self.hide()
