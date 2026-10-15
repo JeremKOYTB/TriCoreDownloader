@@ -1,5 +1,6 @@
 import os
 import sys
+import stat
 import shutil
 import time
 import subprocess
@@ -742,6 +743,19 @@ def launch_updater(parent_window=None, tr_func=None):
     clean_env.pop("_MEIPASS", None)
     clean_env.pop("APPDIR", None)
 
+    if sys.platform.startswith("linux"):
+        clean_env.pop("OWD", None)
+        clean_env.pop("ARGV0", None)
+        if "LD_LIBRARY_PATH_ORIG" in clean_env:
+            clean_env["LD_LIBRARY_PATH"] = clean_env.pop("LD_LIBRARY_PATH_ORIG")
+        else:
+            clean_env.pop("LD_LIBRARY_PATH", None)
+        clean_env.pop("QT_PLUGIN_PATH", None)
+        clean_env.pop("QML2_IMPORT_PATH", None)
+        clean_env.pop("PYTHONPATH", None)
+        clean_env.pop("PYTHONHOME", None)
+        clean_env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
+
     if parent_window and hasattr(parent_window, "app_lock") and parent_window.app_lock.isLocked():
         try:
             parent_window.app_lock.unlock()
@@ -767,6 +781,11 @@ def launch_updater(parent_window=None, tr_func=None):
 
         if sys.platform.startswith("linux"):
             clean_env["ORIGINAL_APPIMAGE"] = orig_target
+            try:
+                st = os.stat(current_exe)
+                os.chmod(current_exe, st.st_mode | stat.S_IEXEC | 0o755)
+            except Exception:
+                pass
 
         args = [current_exe, "--updater", "--install-dir", base_dir, "--original-target", orig_target]
         kwargs = {
@@ -780,6 +799,62 @@ def launch_updater(parent_window=None, tr_func=None):
             kwargs["creationflags"] = 0x00000008 | 0x00000200
         else:
             kwargs["start_new_session"] = True
+            if sys.platform.startswith("linux"):
+                kwargs["close_fds"] = True
+
+        if sys.platform.startswith("linux"):
+            launched_ok = False
+            proc = None
+            try:
+                proc = subprocess.Popen(args, **kwargs)
+                for _ in range(15):
+                    QApplication.processEvents()
+                    time.sleep(0.1)
+                    if proc.poll() is not None:
+                        break
+                if proc.poll() is None and os.path.exists(f"/proc/{proc.pid}"):
+                    launched_ok = True
+            except Exception:
+                launched_ok = False
+
+            if not launched_ok:
+                try:
+                    fallback_env = clean_env.copy()
+                    fallback_env.pop("APPIMAGE_EXTRACT_AND_RUN", None)
+                    fallback_kwargs = dict(kwargs)
+                    fallback_kwargs["env"] = fallback_env
+                    proc = subprocess.Popen(args, **fallback_kwargs)
+                    for _ in range(15):
+                        QApplication.processEvents()
+                        time.sleep(0.1)
+                        if proc.poll() is not None:
+                            break
+                    if proc.poll() is None and os.path.exists(f"/proc/{proc.pid}"):
+                        launched_ok = True
+                except Exception:
+                    launched_ok = False
+
+            if not launched_ok:
+                if parent_window:
+                    parent_window._is_restarting = False
+                    if hasattr(parent_window, "app_lock"):
+                        try:
+                            parent_window.app_lock.tryLock(100)
+                        except Exception:
+                            pass
+                    err_title = tr_func("msg_error_title") if callable(tr_func) else "Error"
+                    QMessageBox.critical(parent_window, err_title, "Impossible de lancer le module de mise à jour.")
+                return False
+
+            if parent_window:
+                parent_window.hide()
+            QApplication.processEvents()
+            time.sleep(0.15)
+            if parent_window:
+                parent_window.close()
+            if QApplication.instance():
+                QApplication.instance().quit()
+            return True
 
         subprocess.Popen(args, **kwargs)
 
@@ -833,17 +908,49 @@ def launch_updater(parent_window=None, tr_func=None):
         kwargs["creationflags"] = 0x00000008 | 0x00000200
     else:
         kwargs["start_new_session"] = True
+        if sys.platform.startswith("linux"):
+            kwargs["close_fds"] = True
 
     proc = subprocess.Popen(
         [sys.executable, target_script, "--install-dir", base_dir, "--original-target", orig_target],
         **kwargs
     )
-    time.sleep(0.25)
-    if proc.poll() is not None and target_script != updater_path:
-        subprocess.Popen(
-            [sys.executable, updater_path, "--install-dir", base_dir, "--original-target", orig_target],
-            **kwargs
-        )
+    if sys.platform.startswith("linux"):
+        for _ in range(12):
+            QApplication.processEvents()
+            time.sleep(0.1)
+            if proc.poll() is not None:
+                break
+        if proc.poll() is not None and target_script != updater_path:
+            proc = subprocess.Popen(
+                [sys.executable, updater_path, "--install-dir", base_dir, "--original-target", orig_target],
+                **kwargs
+            )
+            for _ in range(12):
+                QApplication.processEvents()
+                time.sleep(0.1)
+                if proc.poll() is not None:
+                    break
+        if proc.poll() is not None:
+            if parent_window:
+                parent_window._is_restarting = False
+                if hasattr(parent_window, "app_lock"):
+                    try:
+                        parent_window.app_lock.tryLock(100)
+                    except Exception:
+                        pass
+            return False
+        if parent_window:
+            parent_window.hide()
+        QApplication.processEvents()
+        time.sleep(0.15)
+    else:
+        time.sleep(0.25)
+        if proc.poll() is not None and target_script != updater_path:
+            subprocess.Popen(
+                [sys.executable, updater_path, "--install-dir", base_dir, "--original-target", orig_target],
+                **kwargs
+            )
 
     if parent_window:
         parent_window.close()
