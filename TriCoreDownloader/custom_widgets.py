@@ -19,6 +19,9 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import QIcon, QAction, QFont, QTextCursor
 from .config import APPDATA_DIR, EULA_FILE, save_config
 
+if sys.platform.startswith("linux") and os.environ.get("APPIMAGE") and not os.environ.get("ORIGINAL_APPIMAGE"):
+    os.environ["ORIGINAL_APPIMAGE"] = os.path.abspath(os.environ["APPIMAGE"])
+
 if sys.platform == "darwin":
     CW_INFO_FONT_SIZE = "13pt"
     CW_MONO_FONT_NAME = "Menlo"
@@ -748,10 +751,16 @@ def launch_updater(parent_window=None, tr_func=None):
         clean_env.pop("ARGV0", None)
         if "LD_LIBRARY_PATH_ORIG" in clean_env:
             clean_env["LD_LIBRARY_PATH"] = clean_env.pop("LD_LIBRARY_PATH_ORIG")
-        else:
-            clean_env.pop("LD_LIBRARY_PATH", None)
-        clean_env.pop("QT_PLUGIN_PATH", None)
-        clean_env.pop("QML2_IMPORT_PATH", None)
+        elif "LD_LIBRARY_PATH" in clean_env and getattr(sys, "_MEIPASS", None):
+            meipass = os.path.abspath(getattr(sys, "_MEIPASS", ""))
+            parts = [
+                p for p in clean_env["LD_LIBRARY_PATH"].split(os.pathsep)
+                if p and os.path.abspath(p) != meipass
+            ]
+            if parts:
+                clean_env["LD_LIBRARY_PATH"] = os.pathsep.join(parts)
+            else:
+                clean_env.pop("LD_LIBRARY_PATH", None)
         clean_env.pop("PYTHONPATH", None)
         clean_env.pop("PYTHONHOME", None)
         clean_env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
@@ -781,6 +790,9 @@ def launch_updater(parent_window=None, tr_func=None):
 
         if sys.platform.startswith("linux"):
             clean_env["ORIGINAL_APPIMAGE"] = orig_target
+            if current_exe.lower().endswith(".appimage"):
+                clean_env.pop("QT_PLUGIN_PATH", None)
+                clean_env.pop("QML2_IMPORT_PATH", None)
             try:
                 st = os.stat(current_exe)
                 os.chmod(current_exe, st.st_mode | stat.S_IEXEC | 0o755)
@@ -804,35 +816,68 @@ def launch_updater(parent_window=None, tr_func=None):
 
         if sys.platform.startswith("linux"):
             launched_ok = False
-            proc = None
-            try:
-                proc = subprocess.Popen(args, **kwargs)
-                for _ in range(15):
-                    QApplication.processEvents()
-                    time.sleep(0.1)
-                    if proc.poll() is not None:
-                        break
-                if proc.poll() is None and os.path.exists(f"/proc/{proc.pid}"):
-                    launched_ok = True
-            except Exception:
-                launched_ok = False
+            error_reasons = []
+            debug_log_path = os.path.join(str(APPDATA_DIR), "linux_updater_debug.log")
 
-            if not launched_ok:
+            def _try_linux_spawn(spawn_env, label):
+                log_file = None
                 try:
-                    fallback_env = clean_env.copy()
-                    fallback_env.pop("APPIMAGE_EXTRACT_AND_RUN", None)
-                    fallback_kwargs = dict(kwargs)
-                    fallback_kwargs["env"] = fallback_env
-                    proc = subprocess.Popen(args, **fallback_kwargs)
+                    os.makedirs(str(APPDATA_DIR), exist_ok=True)
+                    log_file = open(debug_log_path, "w+", encoding="utf-8", errors="replace")
+                except Exception:
+                    log_file = None
+
+                local_kwargs = dict(kwargs)
+                local_kwargs["env"] = spawn_env
+                if log_file is not None:
+                    local_kwargs["stdout"] = log_file
+                    local_kwargs["stderr"] = subprocess.STDOUT
+
+                try:
+                    proc = subprocess.Popen(args, **local_kwargs)
                     for _ in range(15):
                         QApplication.processEvents()
                         time.sleep(0.1)
                         if proc.poll() is not None:
                             break
                     if proc.poll() is None and os.path.exists(f"/proc/{proc.pid}"):
-                        launched_ok = True
-                except Exception:
-                    launched_ok = False
+                        if log_file is not None:
+                            try:
+                                log_file.close()
+                            except Exception:
+                                pass
+                        return True
+                    rc = proc.returncode
+                    out_txt = ""
+                    if log_file is not None:
+                        try:
+                            log_file.flush()
+                            log_file.seek(0)
+                            out_txt = log_file.read().strip()
+                            log_file.close()
+                        except Exception:
+                            pass
+                    error_reasons.append(f"{label}: process exited prematurely with code {rc}.\nOutput:\n{out_txt or '<no output>'}")
+                    return False
+                except Exception as exc:
+                    out_txt = ""
+                    if log_file is not None:
+                        try:
+                            log_file.flush()
+                            log_file.seek(0)
+                            out_txt = log_file.read().strip()
+                            log_file.close()
+                        except Exception:
+                            pass
+                    error_reasons.append(f"{label}: exception {repr(exc)}.\nOutput:\n{out_txt or '<no output>'}")
+                    return False
+
+            launched_ok = _try_linux_spawn(clean_env, "Attempt 1 (APPIMAGE_EXTRACT_AND_RUN=1)")
+
+            if not launched_ok:
+                fallback_env = clean_env.copy()
+                fallback_env.pop("APPIMAGE_EXTRACT_AND_RUN", None)
+                launched_ok = _try_linux_spawn(fallback_env, "Attempt 2 (Standard execution)")
 
             if not launched_ok:
                 if parent_window:
@@ -842,8 +887,21 @@ def launch_updater(parent_window=None, tr_func=None):
                             parent_window.app_lock.tryLock(100)
                         except Exception:
                             pass
-                    err_title = tr_func("msg_error_title") if callable(tr_func) else "Error"
-                    QMessageBox.critical(parent_window, err_title, "Unable to launch the update module")
+                    details = (
+                        f"Unable to launch the update module.\n\n"
+                        f"Target executable: {current_exe} (exists={os.path.exists(current_exe)})\n"
+                        f"Command: {' '.join(args)}\n"
+                        f"APPIMAGE={os.environ.get('APPIMAGE')}\n"
+                        f"ORIGINAL_APPIMAGE={os.environ.get('ORIGINAL_APPIMAGE')}\n\n"
+                        + "\n\n".join(error_reasons)
+                    )
+                    err_box = QMessageBox(parent_window)
+                    if hasattr(parent_window, "get_app_icon"):
+                        err_box.setWindowIcon(parent_window.get_app_icon())
+                    err_box.setIcon(QMessageBox.Icon.Critical)
+                    err_box.setWindowTitle("Error")
+                    err_box.setText(details)
+                    err_box.exec()
                 return False
 
             if parent_window:
@@ -875,9 +933,13 @@ def launch_updater(parent_window=None, tr_func=None):
     if not os.path.exists(updater_path):
         if parent_window:
             parent_window._is_restarting = False
-            err_title = tr_func("msg_error_title") if callable(tr_func) else "Error"
-            err_msg = tr_func("upd_err_missing_script") if callable(tr_func) else f"Updater.py script not found at:\n{updater_path}"
-            QMessageBox.critical(parent_window, err_title, err_msg)
+            err_box = QMessageBox(parent_window)
+            if hasattr(parent_window, "get_app_icon"):
+                err_box.setWindowIcon(parent_window.get_app_icon())
+            err_box.setIcon(QMessageBox.Icon.Critical)
+            err_box.setWindowTitle("Error")
+            err_box.setText(f"Unable to launch the update module:\nUpdater.py script not found at:\n{updater_path}")
+            err_box.exec()
         return False
 
     main_script = os.path.join(base_dir, "run_TriCoreDownloader.py")
@@ -911,27 +973,86 @@ def launch_updater(parent_window=None, tr_func=None):
         if sys.platform.startswith("linux"):
             kwargs["close_fds"] = True
 
-    proc = subprocess.Popen(
-        [sys.executable, target_script, "--install-dir", base_dir, "--original-target", orig_target],
-        **kwargs
-    )
     if sys.platform.startswith("linux"):
-        for _ in range(12):
-            QApplication.processEvents()
-            time.sleep(0.1)
-            if proc.poll() is not None:
-                break
-        if proc.poll() is not None and target_script != updater_path:
-            proc = subprocess.Popen(
-                [sys.executable, updater_path, "--install-dir", base_dir, "--original-target", orig_target],
-                **kwargs
-            )
+        error_reasons = []
+        debug_log_path = os.path.join(str(APPDATA_DIR), "linux_updater_debug.log")
+        cmd_a = [sys.executable, target_script, "--install-dir", base_dir, "--original-target", orig_target]
+        log_file = None
+        try:
+            os.makedirs(str(APPDATA_DIR), exist_ok=True)
+            log_file = open(debug_log_path, "w+", encoding="utf-8", errors="replace")
+            kwargs["stdout"] = log_file
+            kwargs["stderr"] = subprocess.STDOUT
+        except Exception:
+            log_file = None
+
+        proc = None
+        try:
+            proc = subprocess.Popen(cmd_a, **kwargs)
             for _ in range(12):
                 QApplication.processEvents()
                 time.sleep(0.1)
                 if proc.poll() is not None:
                     break
-        if proc.poll() is not None:
+        except Exception as exc:
+            error_reasons.append(f"Attempt 1 exception: {repr(exc)}")
+
+        if proc is None or proc.poll() is not None:
+            out_txt = ""
+            if log_file is not None:
+                try:
+                    log_file.flush()
+                    log_file.seek(0)
+                    out_txt = log_file.read().strip()
+                    log_file.close()
+                except Exception:
+                    pass
+            if proc is not None:
+                error_reasons.append(f"Attempt 1 ({os.path.basename(target_script)}) exited with code {proc.returncode}.\nOutput:\n{out_txt or '<no output>'}")
+
+            if target_script != updater_path:
+                cmd_b = [sys.executable, updater_path, "--install-dir", base_dir, "--original-target", orig_target]
+                log_file_b = None
+                try:
+                    log_file_b = open(debug_log_path, "w+", encoding="utf-8", errors="replace")
+                    kwargs["stdout"] = log_file_b
+                    kwargs["stderr"] = subprocess.STDOUT
+                except Exception:
+                    log_file_b = None
+                try:
+                    proc = subprocess.Popen(cmd_b, **kwargs)
+                    for _ in range(12):
+                        QApplication.processEvents()
+                        time.sleep(0.1)
+                        if proc.poll() is not None:
+                            break
+                except Exception as exc:
+                    error_reasons.append(f"Attempt 2 exception: {repr(exc)}")
+
+                if proc is None or proc.poll() is not None:
+                    out_txt_b = ""
+                    if log_file_b is not None:
+                        try:
+                            log_file_b.flush()
+                            log_file_b.seek(0)
+                            out_txt_b = log_file_b.read().strip()
+                            log_file_b.close()
+                        except Exception:
+                            pass
+                    if proc is not None:
+                        error_reasons.append(f"Attempt 2 (Updater.py) exited with code {proc.returncode}.\nOutput:\n{out_txt_b or '<no output>'}")
+                elif log_file_b is not None:
+                    try:
+                        log_file_b.close()
+                    except Exception:
+                        pass
+        elif log_file is not None:
+            try:
+                log_file.close()
+            except Exception:
+                pass
+
+        if proc is None or proc.poll() is not None:
             if parent_window:
                 parent_window._is_restarting = False
                 if hasattr(parent_window, "app_lock"):
@@ -939,12 +1060,29 @@ def launch_updater(parent_window=None, tr_func=None):
                         parent_window.app_lock.tryLock(100)
                     except Exception:
                         pass
+                details = (
+                    f"Unable to launch the update module.\n\n"
+                    f"Command: {' '.join(cmd_a)}\n\n"
+                    + "\n\n".join(error_reasons)
+                )
+                err_box = QMessageBox(parent_window)
+                if hasattr(parent_window, "get_app_icon"):
+                    err_box.setWindowIcon(parent_window.get_app_icon())
+                err_box.setIcon(QMessageBox.Icon.Critical)
+                err_box.setWindowTitle("Error")
+                err_box.setText(details)
+                err_box.exec()
             return False
+
         if parent_window:
             parent_window.hide()
         QApplication.processEvents()
         time.sleep(0.15)
     else:
+        proc = subprocess.Popen(
+            [sys.executable, target_script, "--install-dir", base_dir, "--original-target", orig_target],
+            **kwargs
+        )
         time.sleep(0.25)
         if proc.poll() is not None and target_script != updater_path:
             subprocess.Popen(
