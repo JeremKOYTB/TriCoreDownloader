@@ -24,6 +24,9 @@ from .logos import (
 _SVG_CACHE = {}
 _VOL_CACHE = {}
 
+if sys.platform.startswith("linux") and os.environ.get("APPIMAGE") and not os.environ.get("ORIGINAL_APPIMAGE"):
+    os.environ["ORIGINAL_APPIMAGE"] = os.path.abspath(os.environ["APPIMAGE"])
+
 
 def get_mac_app_bundle_path(path):
     abs_path = os.path.abspath(path)
@@ -176,7 +179,7 @@ class UiInteractionsMixin:
                     launch_updater()
         except Exception as e:
             if hasattr(self, "console_write"):
-                self.console_write(f"[ERROR] Unable to launch the updater : {e}\n")
+                self.console_write(f"[ERROR] Unable to launch the updater: {e}\n")
 
     def on_unlimited_console_toggled(self, checked):
         if getattr(self, "_is_loading_ui", False):
@@ -529,7 +532,7 @@ class UiInteractionsMixin:
 
     def _handle_nsp_toggle(self, checked):
         if checked:
-            title = self.T("nsp_warning_title", "Avertissement !")
+            title = self.T("nsp_warning_title", "Warning!")
             msg = self.T("nsp_warning_msg", "")
 
             msg_box = QMessageBox(self)
@@ -537,8 +540,8 @@ class UiInteractionsMixin:
             msg_box.setText(msg)
             msg_box.setIcon(QMessageBox.Icon.Warning)
 
-            btn_yes = msg_box.addButton(self.T("btn_yes", "Oui"), QMessageBox.ButtonRole.YesRole)
-            btn_no = msg_box.addButton(self.T("btn_no", "Non"), QMessageBox.ButtonRole.NoRole)
+            btn_yes = msg_box.addButton(self.T("btn_yes", "Yes"), QMessageBox.ButtonRole.YesRole)
+            btn_no = msg_box.addButton(self.T("btn_no", "No"), QMessageBox.ButtonRole.NoRole)
             msg_box.setDefaultButton(btn_no)
 
             if hasattr(self, "get_app_icon"):
@@ -859,10 +862,16 @@ class UiInteractionsMixin:
         if sys.platform.startswith("linux"):
             if "LD_LIBRARY_PATH_ORIG" in clean_env:
                 clean_env["LD_LIBRARY_PATH"] = clean_env.pop("LD_LIBRARY_PATH_ORIG")
-            else:
-                clean_env.pop("LD_LIBRARY_PATH", None)
-            clean_env.pop("QT_PLUGIN_PATH", None)
-            clean_env.pop("QML2_IMPORT_PATH", None)
+            elif "LD_LIBRARY_PATH" in clean_env and getattr(sys, "_MEIPASS", None):
+                meipass = os.path.abspath(getattr(sys, "_MEIPASS", ""))
+                parts = [
+                    p for p in clean_env["LD_LIBRARY_PATH"].split(os.pathsep)
+                    if p and os.path.abspath(p) != meipass
+                ]
+                if parts:
+                    clean_env["LD_LIBRARY_PATH"] = os.pathsep.join(parts)
+                else:
+                    clean_env.pop("LD_LIBRARY_PATH", None)
             clean_env.pop("PYTHONPATH", None)
             clean_env.pop("PYTHONHOME", None)
             clean_env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
@@ -910,6 +919,10 @@ class UiInteractionsMixin:
                     exe_target = os.path.abspath(sys.executable)
                     work_dir = os.path.dirname(exe_target)
 
+                if exe_target.lower().endswith(".appimage"):
+                    clean_env.pop("QT_PLUGIN_PATH", None)
+                    clean_env.pop("QML2_IMPORT_PATH", None)
+
                 try:
                     st = os.stat(exe_target)
                     os.chmod(exe_target, st.st_mode | stat.S_IEXEC | 0o755)
@@ -937,36 +950,68 @@ class UiInteractionsMixin:
 
         if sys.platform.startswith("linux"):
             launched_ok = False
-            proc = None
-            try:
-                proc = subprocess.Popen(args_list, **kwargs)
-                for _ in range(15):
-                    QApplication.processEvents()
-                    time.sleep(0.1)
-                    if proc.poll() is not None:
-                        break
-                if proc.poll() is None and os.path.exists(f"/proc/{proc.pid}"):
-                    launched_ok = True
-            except Exception:
-                launched_ok = False
+            error_reasons = []
+            debug_log_path = os.path.join(str(APPDATA_DIR), "linux_restart_debug.log")
 
-            if not launched_ok and is_frozen:
+            def _try_linux_spawn(spawn_env, label):
+                log_file = None
                 try:
-                    fallback_env = clean_env.copy()
-                    fallback_env.pop("APPIMAGE_EXTRACT_AND_RUN", None)
-                    fallback_kwargs = dict(kwargs)
-                    fallback_kwargs["env"] = fallback_env
-                    proc = subprocess.Popen(args_list, **fallback_kwargs)
+                    os.makedirs(str(APPDATA_DIR), exist_ok=True)
+                    log_file = open(debug_log_path, "w+", encoding="utf-8", errors="replace")
+                except Exception:
+                    log_file = None
+
+                local_kwargs = dict(kwargs)
+                local_kwargs["env"] = spawn_env
+                if log_file is not None:
+                    local_kwargs["stdout"] = log_file
+                    local_kwargs["stderr"] = subprocess.STDOUT
+
+                try:
+                    proc = subprocess.Popen(args_list, **local_kwargs)
                     for _ in range(15):
                         QApplication.processEvents()
                         time.sleep(0.1)
                         if proc.poll() is not None:
                             break
                     if proc.poll() is None and os.path.exists(f"/proc/{proc.pid}"):
-                        launched_ok = True
-                except Exception as e:
-                    if hasattr(self, "console_write"):
-                        self.console_write(f"[ERROR] : {e}\n")
+                        if log_file is not None:
+                            try:
+                                log_file.close()
+                            except Exception:
+                                pass
+                        return True
+                    rc = proc.returncode
+                    out_txt = ""
+                    if log_file is not None:
+                        try:
+                            log_file.flush()
+                            log_file.seek(0)
+                            out_txt = log_file.read().strip()
+                            log_file.close()
+                        except Exception:
+                            pass
+                    error_reasons.append(f"{label}: process exited prematurely with code {rc}.\nOutput:\n{out_txt or '<no output>'}")
+                    return False
+                except Exception as exc:
+                    out_txt = ""
+                    if log_file is not None:
+                        try:
+                            log_file.flush()
+                            log_file.seek(0)
+                            out_txt = log_file.read().strip()
+                            log_file.close()
+                        except Exception:
+                            pass
+                    error_reasons.append(f"{label}: exception {repr(exc)}.\nOutput:\n{out_txt or '<no output>'}")
+                    return False
+
+            launched_ok = _try_linux_spawn(clean_env, "Attempt 1 (APPIMAGE_EXTRACT_AND_RUN=1)")
+
+            if not launched_ok and is_frozen:
+                fallback_env = clean_env.copy()
+                fallback_env.pop("APPIMAGE_EXTRACT_AND_RUN", None)
+                launched_ok = _try_linux_spawn(fallback_env, "Attempt 2 (Standard execution)")
 
             if not launched_ok:
                 self._is_restarting = False
@@ -975,8 +1020,25 @@ class UiInteractionsMixin:
                         self.app_lock.tryLock(100)
                     except Exception:
                         pass
+                target_bin = args_list[0] if args_list else "<unknown>"
+                details = (
+                    f"Unable to restart the application.\n\n"
+                    f"Target executable: {target_bin} (exists={os.path.exists(target_bin)})\n"
+                    f"Command: {' '.join(args_list)}\n"
+                    f"Working directory: {work_dir}\n"
+                    f"APPIMAGE={os.environ.get('APPIMAGE')}\n"
+                    f"ORIGINAL_APPIMAGE={os.environ.get('ORIGINAL_APPIMAGE')}\n\n"
+                    + "\n\n".join(error_reasons)
+                )
                 if hasattr(self, "console_write"):
-                    self.console_write("[ERROR] Échec du redémarrage\n")
+                    self.console_write(f"[ERROR] {details}\n")
+                err_box = QMessageBox(self)
+                if hasattr(self, "get_app_icon"):
+                    err_box.setWindowIcon(self.get_app_icon())
+                err_box.setIcon(QMessageBox.Icon.Critical)
+                err_box.setWindowTitle("Error")
+                err_box.setText(details)
+                err_box.exec()
                 return
 
             self.hide()
@@ -992,7 +1054,7 @@ class UiInteractionsMixin:
             subprocess.Popen(args_list, **kwargs)
         except Exception as e:
             if hasattr(self, "console_write"):
-                self.console_write(f"[ERROR] Échec du redémarrage : {e}\n")
+                self.console_write(f"[ERROR] Restart failed: {e}\n")
 
         self.close()
         app = QApplication.instance()
@@ -1043,7 +1105,7 @@ class UiInteractionsMixin:
                         }, f, indent=4)
                 except PermissionError:
                     if hasattr(self, "console_write"):
-                        self.console_write(f"[WARN] Droits insuffisants pour écrire l'EULA dans {APPDATA_DIR}\n")
+                        self.console_write(f"[WARN] Insufficient permissions to write EULA in {APPDATA_DIR}\n")
                 except Exception:
                     pass
             else:
