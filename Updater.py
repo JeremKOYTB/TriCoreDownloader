@@ -23,9 +23,6 @@ import traceback
 
 ssl._create_default_https_context = ssl._create_unverified_context
 
-if sys.platform.startswith("linux"):
-    os.environ["APPIMAGE_EXTRACT_AND_RUN"] = "1"
-
 
 def _tlog(msg, level="INFO"):
     try:
@@ -296,10 +293,8 @@ def _relocate_and_relaunch_if_needed():
             clean_env.pop(var, None)
 
         clean_env["TCD_UPDATER_RELOCATED"] = "1"
-        if sys.platform.startswith("linux"):
-            clean_env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
-            if is_frozen and "tempupdater" not in os.path.basename(src_target).lower():
-                clean_env["ORIGINAL_APPIMAGE"] = src_target
+        if is_frozen and sys.platform.startswith("linux") and "tempupdater" not in os.path.basename(src_target).lower():
+            clean_env["ORIGINAL_APPIMAGE"] = src_target
 
         has_tty = _has_valid_std_stream()
         kwargs = {
@@ -3169,9 +3164,6 @@ class UpdaterWindow(QMainWindow):
                 "LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONHOME", "QT_PLUGIN_PATH", "QML2_IMPORT_PATH"
             ):
                 env.pop(clean_var, None)
-
-            if sys.platform.startswith("linux"):
-                env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
 
             is_python_script = target.lower().endswith(".py")
             if is_python_script:
