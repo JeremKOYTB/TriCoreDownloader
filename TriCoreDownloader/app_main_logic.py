@@ -989,20 +989,24 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
             clean_env.pop("ARGV0", None)
 
             if sys.platform.startswith("linux"):
-                if "LD_LIBRARY_PATH_ORIG" in clean_env:
-                    clean_env["LD_LIBRARY_PATH"] = clean_env.pop("LD_LIBRARY_PATH_ORIG")
-                elif "LD_LIBRARY_PATH" in clean_env and getattr(sys, "_MEIPASS", None):
-                    meipass = os.path.abspath(getattr(sys, "_MEIPASS", ""))
-                    parts = [
-                        p for p in clean_env["LD_LIBRARY_PATH"].split(os.pathsep)
-                        if p and os.path.abspath(p) != meipass
-                    ]
-                    if parts:
-                        clean_env["LD_LIBRARY_PATH"] = os.pathsep.join(parts)
-                    else:
-                        clean_env.pop("LD_LIBRARY_PATH", None)
+                clean_env.pop("LD_LIBRARY_PATH", None)
+                clean_env.pop("LD_LIBRARY_PATH_ORIG", None)
+                clean_env.pop("LD_PRELOAD", None)
+                clean_env.pop("QT_PLUGIN_PATH", None)
+                clean_env.pop("QML2_IMPORT_PATH", None)
                 clean_env.pop("PYTHONPATH", None)
                 clean_env.pop("PYTHONHOME", None)
+                clean_env.pop("PYINSTALLER_RESET_ENVIRONMENT", None)
+                for env_key in ("PATH", "XDG_DATA_DIRS", "GI_TYPELIB_PATH", "GST_PLUGIN_SYSTEM_PATH", "GST_PLUGIN_PATH"):
+                    if env_key in clean_env:
+                        filtered = [
+                            p for p in clean_env[env_key].split(os.pathsep)
+                            if p and not p.startswith(("/tmp/.mount_", "/tmp/_MEI", "/tmp/appimage_extracted_"))
+                        ]
+                        if filtered:
+                            clean_env[env_key] = os.pathsep.join(filtered)
+                        else:
+                            clean_env.pop(env_key, None)
                 clean_env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
 
             if hasattr(self, "app_lock") and self.app_lock.isLocked():
@@ -1030,9 +1034,6 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
                     orig_target = current_exe
 
                 if sys.platform.startswith("linux"):
-                    if current_exe.lower().endswith(".appimage"):
-                        clean_env.pop("QT_PLUGIN_PATH", None)
-                        clean_env.pop("QML2_IMPORT_PATH", None)
                     try:
                         st = os.stat(current_exe)
                         os.chmod(current_exe, st.st_mode | stat.S_IEXEC | 0o755)
