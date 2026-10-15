@@ -3,20 +3,42 @@
 A GUI tool to download official Nintendo firmwares (Switch 1, Wii U, 3DS) directly from their servers.
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/9626f4d7-c06b-4c86-966e-168ef92dd213" width="200" alt="TriCoreDownloader" />
+  <table align="center" style="border: none; border-collapse: collapse;">
+    <tr>
+      <td align="center" style="border: none; padding: 15px;">
+        <img src="icons/TriCoreDownloader.PC.svg" width="256" height="256" alt="PC Logo"><br>
+        <sub>Standard Windows/Linux PC logo</sub>
+      </td>
+      <td align="center" style="border: none; padding: 15px;">
+        <img src="icons/TriCoreDownloader.Apple.svg" width="256" height="256" alt="Apple Logo"><br>
+        <sub>Apple-style logo exclusive to macOS</sub>
+      </td>
+    </tr>
+  </table>
 </p>
-
 **TriCoreDownloader** is a non-profit, open-source tool for downloading, decrypting, assembling, and verifying official firmware.
 
 It is designed for software preservation, enabling you to install files on either a real console or an emulator, depending on your selection.
 
 ---
 
+## Pre-compiled Binaries (Version 1.1.0+) 👀
+
+Starting with version 1.1.0, **TriCoreDownloader** is now fully compiled and ready to use! You no longer need to bother with setting up Python and its dependencies. Ready-to-use binaries are provided for:
+* **Windows x64**
+* **macOS (Intel & Apple Silicon)**
+* **Linux x64 (AppImage)**
+
+*Note: A sufficiently recent operating system compatible with at least Python 3.12 and PyQt 6 is still required. Sorry*
+
+If you prefer to run or contribute to the tool from the source code the traditional way, you can still do so using the instructions below.
+
+---
+
 ## ⚠️ Critical Security & Legal Warnings
 
-* **Risk of Hardware Damage:** Installing these files onto a real console carries inherent risks. Any interruption or error during the installation process can permanently break your console. I decline all responsibility for bricked consoles, lost data, or bans. You are using this utility entirely at **your own risk**.
-
-* **Liability:** This program is provided **"as-is"** under the MIT License. 
+* **Risk of Hardware Damage:** Installing these files onto a real console carries inherent risks. Any interruption or error during the installation process can permanently break your console.
+I decline all responsibility for bricked consoles, lost data, or bans. You are using this utility entirely at **your own risk**.
 
 > [!CAUTION]
 > * **Console Bans & Privacy Risks:** Sharing your unique system files online is extremely dangerous. This includes files such as **prodinfo** (`PRODINFO.bin`), **client certificates** (`certificate.pem`), **keys** (`prod.keys`), or **boot9** file (`boot9.bin`). If you share these unique files publicly, Nintendo will permanently ban your console.
@@ -30,7 +52,9 @@ It is designed for software preservation, enabling you to install files on eithe
 
 > [!CAUTION]
 > **CDN Availability & Scope:** This application downloads files directly from Nintendo's official servers. It can only fetch files that are currently active and online. It cannot retrieve development builds or firmwares for unlisted platforms (such as the 'Switch 2'). If a file is no longer hosted on their servers, the tool cannot find it. Please do not open GitHub issues regarding "missing server files".
+
 ---
+
 ## Prerequisites
 
 To keep things secure and legal, you must extract the required files yourself from your own physical consoles. **Never download these components from third-party websites.**
@@ -40,29 +64,32 @@ To keep things secure and legal, you must extract the required files yourself fr
 * The `prod.keys` file (extracted via [Lockpick_RCM](https://github.com/THZoria/Lockpick_RCMaster) or [Lockpick_RCM_Pro](https://github.com/sthetix/Lockpick_RCM_Pro)).
 * The `PRODINFO.bin` file (a backup of your console's eMMC).
 * ~~The `certificate.pem` file (your unique connection certificate, extracted via tools like [NX-ProdToPEM](https://github.com/JeremKOYTB/NX-ProdToPEM)).~~
+
 > [!NOTE]
-> The certificate file is no longer needed since version 1.0.0 of TriCoreDownloader 
+> The certificate file is no longer needed since version 1.0.0 of TriCoreDownloader.
 
 ### Nintendo 3DS (CTR)
 * The `boot9.bin` file (extracted via [GodMode9](https://github.com/d0k3/GodMode9), optional, but required only if you want to decrypt CIA files).
   
 ### Nintendo Wii U (CAFE)
 * The Wii U Common Key or a raw console backup file (the `otp.bin`).
+
 > [!NOTE]
 > `otp.bin` can be obtained by dumping your console's NAND using homebrew tools such as **[Dumpling](https://github.com/dumpling-app/dumpling)** (via the [Homebrew Launcher](https://github.com/dimok789/homebrew_launcher)).
 
 ---
 
-## Installation
+## Installation (From Source)
 
-The program requires a recent version of Python and the following libraries: `PyQt6`, `cryptography`, `requests`, `pyctr`, and `anynet`.
+If you choose to run the tool from source, it requires a recent version of Python.
 
-A helpful startup script named `start.bat` is included to install everything automatically!
+A helpful startup script named `start.x` is included to install everything automatically!
 
 If you prefer to install these requirements manually via your terminal, run the following command:
 
 ```bash
-pip install PyQt6 cryptography requests pyctr anynet
+pip install PyQt6 requests urllib3 netifaces2 pyctr cryptography py7zr darkdetect
+pip install anynet --no-deps
 
 ```
 
@@ -71,11 +98,9 @@ pip install PyQt6 cryptography requests pyctr anynet
 # OS Compatibility
 
 > [!NOTE]
-> This project is fully compatible with **Windows 10** *(version 20H1 and newer)* **and Windows 11**.
-> Testing on Linux and macOS has not been completed yet, meaning they are not officially supported at this time.
-> If you would like to help make the tool compatible with these systems, code contributions (Pull Requests) are highly welcome! :)
----
-*(Btw, there are **Visual Themes:** offering several interface styles (light, dark, full black for OLED screens) and an "RGB G@MING 😎" mode ("Rainbow Mode").) 🤯*
+> Pre-compiled versions are fully compatible and tested for **Windows x64**, **macOS (Intel)**, and **Linux x64**.
+> I can't test on Apple Silicon, but if there's a problem, don't hesitate to let me know!
+> A OS compatible with at least **Python 3.12** and **PyQt 6** is required.
 
 ---
 
@@ -101,14 +126,13 @@ Main_Folder/
      ├───Languages/           (Translation files)
      └───Songs/               (Audio files)
 
-
 ```
+
 > [!NOTE]
 > **External Dependencies:** This project does not include the [aria2c](https://github.com/aria2/aria2) or [OpenSSL](https://github.com/openssl/openssl) binaries.
->
 > You are responsible for acquiring and integrating them into the project directory yourself.
->
 > Only use aria2c if you need it; it is not required for the tool to function correctly if you do not need it.
+
 ---
 
 ## Technical Workflow
@@ -119,26 +143,18 @@ Main_Folder/
 servs (or local database)  your keys (boot9, etc.)     (Using standard engine or aria2c)
                                                                      |
                                                                      v
-[6. Ready Files]     <---- [5. Decryption]           <---- [4. Integrity Check]
+[6. Ready Files]     <----      [5. Decryption]    <----     [4. Integrity Check]
  Creates clean .zip,        Opens Nintendo files and       Calculates signatures to
- .cia, or folders          converts them into folders    ensure the file is correct
+ .cia, or folders          converts them into folders      ensure the file is correct
 
 ```
 
 ---
 
 1. **Discovery:** The program connects to online databases (like [YLS8](https://yls8.mtheall.com/ninupdates/reports.php)) to find the correct version numbers and the list of files to fetch.
-
-
 2. **Verification:** The system checks that your local keys and console files are valid before launching any server requests.
-
-
 3. **Data Acquisition:** The tool downloads the requested files. The fast `aria2c` system is configured for the Switch, while standard downloading is used for 3DS and Wii U.
-
-
 4. **Integrity Check:** Downloaded files are verified byte by byte to ensure they match the original files exactly.
-
-
 5. **Decryption:** The program uses your console keys to open Nintendo's files and packages them into clean folders ready for emulators (like Cemu or Citra) or safe console update tools (like Daybreak, wafel_setup_mlc).
 
 ---
@@ -147,12 +163,18 @@ servs (or local database)  your keys (boot9, etc.)     (Using standard engine or
 
 1. **Booting:**
 
-* **Recommended:** Launch the program via the `start.bat` file. This ensures all software libraries are properly installed.
-* **Alternative:** Run the command `python run_TriCoreDownloader.py` directly in your terminal.
+* **Recommended:** Launch the pre-compiled executable directly for your platform, bypassing manual setup entirely.
+
+  
+* **Alternative (Source):** Run the program via the `start.x` file or use the command `python run_TriCoreDownloader.py` directly in your terminal.
 
 2. **Platform Choice:** Click on the tab of your chosen console at the top of the window.
+  
 3. **Configuration:** Go to the **Configuration** panel to tell the program where your keys, certificates, or tools are stored.
+   
 4. **Version Choice:** Leave the default version or manually type the version string you want (for example: `21.2.0.0140` for Switch, `11.17.0-50` for 3DS, or `5.5.5E` for Wii U) and start the download.
+
+(PS: Selecting versions requires the advanced options)
 
 ---
 
@@ -174,12 +196,13 @@ This tool combines software preservation work made possible by research shared a
 
 **Nintendo Switch Engine (NX):**
 
-* **Core Logic:** Based on the [firmware_downloader.py](https://github.com/THZoria/NX_Firmware/blob/main/firmware_downloader.py) script; *code sourced from an unidentified original author and shared via `THZoria`*.
+* **Core Logic:** Based on the [firmware_downloader.py](https://github.com/THZoria/NX_Firmware/blob/main/firmware_downloader.py) script; *code sourced from an unidentified original author and shared via `THZoria*`.
 * **Version Lists:** Leverages data structures from **8BitWonder** ([Nintendo Switch Firmware Datfile](https://gbatemp.net/download/nintendo-switch-firmware-datfile.36558/)) to identify correct firmware versions (referenced for informational purposes, though not directly integrated into the script's execution).
 
 ---
 
 **Nintendo 3DS Engine (CTR):**
+
 * Base Concepts: Inspired by older tools from `DrHacknik` ([3DNUS](https://github.com/DrHacknik/3DNUS)) and `WiiDatabase` ([3DS-NUSD](https://github.com/WiiDatabase/3DS-NUSD)).
 * Region Mapping: Uses regional file layout structures provided by the `Lime3DS` ([Lime3DS](https://github.com/Lime3DS)) core team.
 * Decryption Backend: Uses core functions from the Python `pyctr` ([pyctr](https://github.com/ihaveamac/pyctr)) library.
@@ -187,6 +210,7 @@ This tool combines software preservation work made possible by research shared a
 ---
 
 **Nintendo Wii U Engine (CAFE):**
+
 * Inspiration: Based on research and code structures from `Xpl0itU` ([MLCRestorerDownloader](https://github.com/Xpl0itU/MLCRestorerDownloader)).
 
 ---
@@ -206,9 +230,10 @@ As I am still in the early stages of learning Python, I have relied heavily on t
 Because of this, the codebase is a work in progress and may not be optimized.
 I warmly welcome feedback, code reviews, and human contributions!
 
-If you notice any illogical structures or have better ways to implement certain features, please do not hesitate to share your insights all human contributions are highly appreciated and will help this project grow. 🙏
+If you notice any illogical structures or have better ways to implement certain features, please do not hesitate to share your insights—all human contributions are highly appreciated and will help this project grow. 🙏
 
 ---
+
 ## A note on transparency:
 
 I want to be fully transparent about my development process.
@@ -225,12 +250,12 @@ My priority is to provide a useful, reliable tool for the preservation community
 Before contacting support or opening an issue, please read this section **carefully**:
 
 1. **Does TriCoreDownloader allow downloading games?**
-   
+
 **NO.** This tool is strictly reserved for downloading system updates (firmwares) from official Nintendo servers.
 It does not allow, in any capacity, the download of games or any other illegal content.
 
 2. **Does it officially support other systems than Windows 10 (20H1+) and 11?**
-   
+
 **NO.** Only Windows 10 (version 20H1 and newer) and Windows 11 are officially supported.
 I cannot confirm if it works on 32-bit OS versions. I strongly recommend Windows 11 for a guaranteed, trouble-free experience.
 
@@ -239,22 +264,22 @@ But it will require both the desire and the time to do so.
 To speed up this process, if you are also motivated, do not hesitate to submit Pull Requests!
 
 3. **Will you support Windows XP, Vista, 7, 8, or older versions of Windows 10?**
-   
+
 **NO.** Supporting these systems would require major technical concessions that I cannot afford.
 If you absolutely need it to work on an older OS, you are free to attempt to create the compatibility yourself;
 if it works correctly, you are welcome to propose your ideas via a Pull Request.
 
 4. **Can I use keys found online?**
 
-**NO.** You must obligatorily use your own personal keys if you wish to download or decrypt. This is purely and simply for legal reasons.
+**NO.** You must use your own personal keys if you wish to download or decrypt. This is purely and simply for legal reasons.
 
 5. **Is it safe to download TriCoreDownloader from other repositories?**
-   
+
 **NO.** I do not recommend downloading TriCoreDownloader from anywhere other than my own repository.
 You may only do so if you are 100% sure you know the person and their intentions.
 
 6. **Does TriCoreDownloader collect my data?**
-   
+
 **NO.** The tool does not collect any data whatsoever. The update check strictly looks to see if your version matches the latest one. I have no way of knowing who is behind the downloads or any statistics regarding who is currently using my tool. Just check the code; it is 100% open source!
 
 7. **Is this a virus?**
@@ -265,7 +290,7 @@ If you have any doubts, do not download it, or put it in a VM as a last resort.
 
 8. **Can TriCoreDownloader bypass 404 errors?**
 
-**NO**. It cannot bypass a 404 error. If you encounter a 404 error, it simply means the file does not exist on Nintendo's servers.
+**NO**. It cannot bypass a 404 error. If you encounter a 404 error, it means the file does not exist on Nintendo's servers.
 
 Technically, a 404 response indicates that the server cannot find the requested resource.
 Because TriCoreDownloader performs a direct request to these official servers, it cannot magically retrieve content that is missing.
@@ -274,11 +299,11 @@ This is specifically relevant for Wii U titles in the 1.x.x range.
 Since the YLS8 database does not record the specific version or the number of titles available for this range (1.0.0 to 1.9.9), TriCoreDownloader cannot determine the correct version.
 Consequently, to ensure the process still functions, the tool automatically defaults to downloading all titles as "v0".
 
-If you see a 404 error, it is because the file does not exist on the server. 
+If you see a 404 error, it is because the file does not exist on the server.
 Please stop sending me messages on Discord or Twitter about this; it is not a bug, but a necessary technical constraint.
 
 9. **How do I provide useful, clear, and effective feedback?**
-    
+
 When you notice an issue, please specify exactly what you were trying to do in the smallest details. Ensure your report is clear enough to understand.
 I have received things like:
 
@@ -286,11 +311,10 @@ I have received things like:
 > Only allows you to download WUP files of that firmware
 > v0 never happening award"
 
-
 That is not really feedback. Please be clearer in your reports/issues so I can actually help.
 
 10. **Is the code reliable if it was assisted by Gemini?**
-    
+
 **NO.** The fact that TriCoreDownloader exists thanks to the help of Gemini does not mean it is infallible.
 I have specifically encouraged you to make Pull Requests on this subject if you wish to make the code more "human."
 Please stop telling me the code is dangerous without explaining why. Please show me the specific parts of the code that make you say it is dangerous.
@@ -301,13 +325,8 @@ Without context, I cannot understand!
 
 ## Legal Disclaimer
 
----
-
 * **Trademarks & Copyrights:** All product names, logos, brands, and trademarks, including all Nintendo-related intellectual property and console names, are the sole property of their respective owners (Nintendo Co., Ltd. and its affiliates).
-
----
 * **Audio & Assets:** Any audio files, sound effects, or visual assets belonging to Nintendo that are included or utilized within this software are used under fair use principles for identification and nostalgia purposes.
----
 * **No Affiliation:** This project is not affiliated, associated, authorized, endorsed by, or in any way officially connected with Nintendo Co., Ltd., or any of its subsidiaries.
 
 ---
@@ -316,4 +335,4 @@ Without context, I cannot understand!
 
 This project is open-source and distributed under the terms of the **MIT License**.
 
-You are free to copy, modify, study, or share this software, provided that the original author names (me lol) and this license text remain included in your copies.
+You are free to copy, modify, study, or share this software, provided that the original author names (JérémKO) and this license text remain included in your copies.

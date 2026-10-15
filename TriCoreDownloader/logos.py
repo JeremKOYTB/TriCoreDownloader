@@ -1,10 +1,97 @@
 TCD_MAIN_LOGO = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="pcPlateDark" x1="0" y1="0" x2="0" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#343742"/>
+      <stop offset="100%" stop-color="#1E2027"/>
+    </linearGradient>
+    <linearGradient id="pcTraySolid" x1="0" y1="82" x2="0" y2="106" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#A6ABB9"/>
+      <stop offset="100%" stop-color="#7D8290"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#pcPlateDark)"/>
+  <rect x="0.5" y="0.5" width="127" height="127" rx="27.5" fill="none" stroke="#454957" stroke-width="1"/>
+  <path d="M24 82 L24 98 A 8 8 0 0 0 32 106 L96 106 A 8 8 0 0 0 104 98 L104 82" fill="none" stroke="url(#pcTraySolid)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M64 20 L64 42" stroke="#FF3E3E" stroke-width="16" stroke-linecap="round"/>
+  <path d="M64 42 L64 64" stroke="#00A2E8" stroke-width="16" stroke-linecap="round"/>
+  <path d="M64 64 L64 78" stroke="#C4A1FF" stroke-width="16" stroke-linecap="round"/>
+  <path d="M38 64 L64 90 L90 64" fill="none" stroke="#C4A1FF" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>"""
+
+TCD_MAIN_LOGO_LEGACY = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
     <rect width="128" height="128" rx="28" fill="#4A4A54"/>
     <path d="M64 20 L64 42" stroke="#FF3E3E" stroke-width="16" stroke-linecap="round"/>
     <path d="M64 42 L64 64" stroke="#00A2E8" stroke-width="16" stroke-linecap="round"/>
     <path d="M64 64 L64 86" stroke="#C4A1FF" stroke-width="16" stroke-linecap="round"/>
     <path d="M38 64 L64 90 L90 64" fill="none" stroke="#C4A1FF" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
     <path d="M24 82 L24 98 A 8 8 0 0 0 32 106 L96 106 A 8 8 0 0 0 104 98 L104 82" fill="none" stroke="#9595A0" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>"""
+
+TCD_MAIN_LOGO_APPLE = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <filter id="sharedForegroundShadow" x="-30%" y="-40%" width="160%" height="250%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="1.5" flood-color="#000000" flood-opacity="0.35"/>
+      <feDropShadow dx="0" dy="5" stdDeviation="3.5" flood-color="#000000" flood-opacity="0.4"/>
+      <feDropShadow dx="0" dy="10" stdDeviation="8" flood-color="#000000" flood-opacity="0.25"/>
+    </filter>
+
+    <radialGradient id="glassBody" cx="50%" cy="10%" r="90%">
+      <stop offset="0%" stop-color="#474A58"/>
+      <stop offset="45%" stop-color="#282933"/>
+      <stop offset="100%" stop-color="#14151B"/>
+    </radialGradient>
+
+    <linearGradient id="glassBorder" x1="64" y1="0" x2="64" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.4"/>
+      <stop offset="30%" stop-color="#FFFFFF" stop-opacity="0.12"/>
+      <stop offset="80%" stop-color="#000000" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.08"/>
+    </linearGradient>
+
+    <linearGradient id="glassRed" x1="64" y1="12" x2="64" y2="44" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFAEAE"/>
+      <stop offset="25%" stop-color="#FF3848"/>
+      <stop offset="80%" stop-color="#D91624"/>
+      <stop offset="100%" stop-color="#B8101E"/>
+    </linearGradient>
+
+    <linearGradient id="glassBlue" x1="64" y1="38" x2="64" y2="66" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1AC8FF"/>
+      <stop offset="20%" stop-color="#00A2F0"/>
+      <stop offset="75%" stop-color="#006CD0"/>
+      <stop offset="100%" stop-color="#004DA8"/>
+    </linearGradient>
+
+    <linearGradient id="glassPurple" x1="64" y1="58" x2="64" y2="96" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#CFACFF"/>
+      <stop offset="25%" stop-color="#B37DFF"/>
+      <stop offset="70%" stop-color="#8035DE"/>
+      <stop offset="100%" stop-color="#4F1199"/>
+    </linearGradient>
+
+    <linearGradient id="glassTray" x1="64" y1="74" x2="64" y2="110" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.95"/>
+      <stop offset="20%" stop-color="#EDF2FB" stop-opacity="0.8"/>
+      <stop offset="65%" stop-color="#CBD3E6" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#9CA5BC" stop-opacity="0.5"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="128" height="128" rx="28" fill="url(#glassBody)"/>
+  <rect x="0.5" y="0.5" width="127" height="127" rx="27.5" fill="none" stroke="url(#glassBorder)" stroke-width="1"/>
+
+  <g filter="url(#sharedForegroundShadow)">
+    <path d="M24 82 L24 98 A 8 8 0 0 0 32 106 L96 106 A 8 8 0 0 0 104 98 L104 82"
+          fill="none"
+          stroke="url(#glassTray)"
+          stroke-width="14"
+          stroke-linecap="round"
+          stroke-linejoin="round"/>
+    <path d="M64 20 L64 42" stroke="url(#glassRed)" stroke-width="16" stroke-linecap="round"/>
+    <path d="M64 42 L64 64" stroke="url(#glassBlue)" stroke-width="16" stroke-linecap="round"/>
+    <path d="M64 64 L64 86" stroke="url(#glassPurple)" stroke-width="16" stroke-linecap="round"/>
+    <path d="M38 64 L64 90 L90 64" fill="none" stroke="url(#glassPurple)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
 </svg>"""
 
 VOL_MUTE_SVG = b"""<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>"""

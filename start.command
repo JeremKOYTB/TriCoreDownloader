@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 
-export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/Library/Frameworks/Python.framework/Versions/3.12/bin:/Library/Frameworks/Python.framework/Versions/Current/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
 THIS_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$THIS_DIR"
@@ -9,20 +9,28 @@ APP_NAME="TriCoreDownloader"
 SCRIPT_NAME="run_TriCoreDownloader.py"
 VENV_DIR="$THIS_DIR/.venv"
 FLAG_FILE="$THIS_DIR/.env_ok"
-MODULES=(PyQt6 requests urllib3 anyio pyopenssl multidict netifaces2 pyctr cryptography)
+MODULES=(PyQt6 requests urllib3 certifi netifaces2 pyctr cryptography py7zr darkdetect)
 
 CONFIG_DIR="$HOME/Library/Application Support/TriCoreDownloader"
 CONFIG_FILE="$CONFIG_DIR/config.json"
 
 ADVANCED_LOGS="False"
 if [ -f "$CONFIG_FILE" ]; then
-    if python3 -c "import json, sys; sys.exit(0 if json.load(open('$CONFIG_FILE')).get('advanced_logs') else 1)" 2>/dev/null; then
+    if grep -Eq '"advanced_logs"[[:space:]]*:[[:space:]]*true' "$CONFIG_FILE" 2>/dev/null; then
         ADVANCED_LOGS="True"
     fi
 fi
 
-OS_LOCALE=$(defaults read -g AppleLocale 2>/dev/null || echo "$LANG")
-if [[ "$OS_LOCALE" == fr* ]]; then
+OS_LOCALE=$(defaults read -g AppleLanguages 2>/dev/null | tr -d '()\n ",' | cut -c1-2)
+if [ -z "$OS_LOCALE" ]; then
+    OS_LOCALE=$(defaults read -g AppleLocale 2>/dev/null)
+fi
+if [ -z "$OS_LOCALE" ]; then
+    OS_LOCALE="${LC_ALL:-${LANG:-EN}}"
+fi
+
+OS_LOCALE_LOWER=$(echo "$OS_LOCALE" | tr '[:upper:]' '[:lower:]')
+if [[ "$OS_LOCALE_LOWER" == fr* ]]; then
     LANG_CODE="FR"
 else
     LANG_CODE="EN"
@@ -40,6 +48,7 @@ if [ "$LANG_CODE" = "FR" ]; then
     MSG_UP_PIP="[INFO] Mise à jour de PIP..."
     MSG_INS_COMP="[INFO] Installation des composants principaux (téléchargement en cours)..."
     MSG_OPT_ENV="[INFO] Optimisation de l'environnement..."
+    MSG_ERR_MOD="[ERREUR] Échec de l'installation des modules Python."
     MSG_LAUNCH="[INFO] LANCEMENT :"
     MSG_PY_EXE="[INFO] Exécutable Python :"
     MSG_ERR_EXIT="[ERREUR] Le script Python s'est fermé avec le code :"
@@ -57,6 +66,7 @@ else
     MSG_UP_PIP="[INFO] Updating PIP..."
     MSG_INS_COMP="[INFO] Installing main components (download in progress)..."
     MSG_OPT_ENV="[INFO] Environment optimization..."
+    MSG_ERR_MOD="[ERROR] Failed to install Python modules."
     MSG_LAUNCH="[INFO] LAUNCHING :"
     MSG_PY_EXE="[INFO] Python Executable :"
     MSG_ERR_EXIT="[ERROR] Python script exited with code :"
@@ -87,17 +97,24 @@ if read -t 3 -k 1 KEY 2>/dev/null; then
         find "$THIS_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null
         echo "$MSG_PURGE_SUCCESS"
         sleep 1
-        clear
     fi
 else
     echo ""
 fi
 
+if [ "$ADVANCED_LOGS" = "False" ]; then
+    clear
+fi
+
 find_python() {
-    for cmd in python3.13 python3.12 python312 python3; do
+    for cmd in python3.12 python312 python3.13 python3.14 python3; do
         if command -v "$cmd" >/dev/null 2>&1; then
-            if "$cmd" -c "import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)" 2>/dev/null; then
-                command -v "$cmd"
+            cmd_path="$(command -v "$cmd")"
+            if [ "$cmd_path" = "/usr/bin/python3" ] && ! xcode-select -p >/dev/null 2>&1; then
+                continue
+            fi
+            if "$cmd_path" -c "import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)" 2>/dev/null; then
+                echo "$cmd_path"
                 return 0
             fi
         fi
@@ -107,7 +124,7 @@ find_python() {
 
 if [ -f "$FLAG_FILE" ] && [ -d "$VENV_DIR" ]; then
     PY_BIN="$VENV_DIR/bin/python"
-    if [ -f "$PY_BIN" ]; then
+    if [ -x "$PY_BIN" ]; then
         if [ "$ADVANCED_LOGS" = "True" ]; then
             echo "[$(date)] Fast launching with cached venv: $PY_BIN"
             echo ""
@@ -122,6 +139,7 @@ if [ -f "$FLAG_FILE" ] && [ -d "$VENV_DIR" ]; then
         PY_ERR=$?
 
         if [ $PY_ERR -ne 0 ]; then
+            rm -f "$FLAG_FILE"
             echo ""
             echo "$MSG_ERR_EXIT $PY_ERR"
             read -k 1 "REPLY?$MSG_PRESS_KEY"
@@ -147,28 +165,43 @@ fi
 echo ""
 echo "$MSG_SETUP_MOD"
 
-if [ ! -d "$VENV_DIR" ]; then
+if [ ! -x "$VENV_DIR/bin/python" ]; then
+    rm -rf "$VENV_DIR"
     "$SYSTEM_PY" -m venv "$VENV_DIR"
 fi
 
 PY_BIN="$VENV_DIR/bin/python"
+DEPS_OK=1
 
 echo ""
 echo "$MSG_UP_PIP"
-"$PY_BIN" -m pip install --upgrade pip --quiet
+"$PY_BIN" -m pip install --upgrade pip --disable-pip-version-check --quiet || DEPS_OK=0
 echo "OK."
 
 echo ""
 echo "$MSG_INS_COMP"
-"$PY_BIN" -m pip install "${MODULES[@]}" --disable-pip-version-check
+"$PY_BIN" -m pip install --prefer-binary "${MODULES[@]}" --disable-pip-version-check || DEPS_OK=0
 echo "OK."
 
 echo ""
 echo "$MSG_OPT_ENV"
-"$PY_BIN" -m pip install anynet --no-deps --quiet
+"$PY_BIN" -m pip install --prefer-binary anynet --no-deps --disable-pip-version-check --quiet || DEPS_OK=0
 echo "OK."
 
-touch "$FLAG_FILE"
+if ! "$PY_BIN" -c "import PyQt6, requests, cryptography, pyctr" >/dev/null 2>&1; then
+    DEPS_OK=0
+fi
+
+if [ $DEPS_OK -eq 1 ]; then
+    touch "$FLAG_FILE"
+else
+    rm -f "$FLAG_FILE"
+    echo ""
+    echo "$MSG_ERR_MOD"
+    read -k 1 "REPLY?$MSG_PRESS_KEY"
+    echo ""
+    exit 1
+fi
 
 if [ "$ADVANCED_LOGS" = "True" ]; then
     echo ""
@@ -189,6 +222,7 @@ fi
 PY_ERR=$?
 
 if [ $PY_ERR -ne 0 ]; then
+    rm -f "$FLAG_FILE"
     echo ""
     echo "$MSG_ERR_EXIT $PY_ERR"
     read -k 1 "REPLY?$MSG_PRESS_KEY"

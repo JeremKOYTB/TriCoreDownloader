@@ -1,0 +1,746 @@
+name: Build Multiplatform Executables
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_windows:
+        description: 'Build Windows (x64)'
+        type: boolean
+        default: true
+      build_linux:
+        description: 'Build Linux (AppImage x86_64)'
+        type: boolean
+        default: true
+      build_macos_arm64:
+        description: 'Build macOS ARM64 (Apple Silicon)'
+        type: boolean
+        default: true
+      build_macos_x64:
+        description: 'Build macOS x64 (Intel)'
+        type: boolean
+        default: true
+      publish_mode:
+        description: 'Publish Mode (Artifacts / Release / Pre-release)'
+        type: choice
+        options:
+          - 'Artifacts'
+          - 'Release'
+          - 'Pre-release'
+        default: 'Artifacts'
+      is_draft:
+        description: 'Create Release as Draft (ignored in Artifacts mode)'
+        type: boolean
+        default: false
+      custom_tag:
+        description: 'Custom Tag name (optional, e.g. v1.1.0 - leave blank for auto)'
+        type: string
+        required: false
+        default: ''
+      release_notes:
+        description: 'Custom release notes / changelog (optional)'
+        type: string
+        required: false
+        default: ''
+
+jobs:
+  matrix-setup:
+    name: Setup Build Matrix & Version
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.set-targets.outputs.targets }}
+      app_version: ${{ steps.extract-version.outputs.app_version }}
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Extract & Validate Mandatory Version
+        id: extract-version
+        run: |
+          python3 -c "
+          import re, sys
+
+          config_file = 'TriCoreDownloader/config.py'
+          try:
+              with open(config_file, 'r', encoding='utf-8') as f:
+                  content = f.read()
+          except Exception as e:
+              print(f'ERROR: Failed to read {config_file}: {e}', file=sys.stderr)
+              sys.exit(1)
+
+          match = re.search(r'APP_VERSION\s*=\s*[\"\']([^\"\']+)[\"\']', content)
+          if not match:
+              print('FATAL ERROR: APP_VERSION declaration was not found in TriCoreDownloader/config.py!', file=sys.stderr)
+              sys.exit(1)
+
+          version = match.group(1).strip()
+          if not version:
+              print('FATAL ERROR: APP_VERSION string cannot be empty!', file=sys.stderr)
+              sys.exit(1)
+
+          with open(sys.argv[1], 'a', encoding='utf-8') as gh_out:
+              gh_out.write(f'app_version={version}\n')
+
+          print(f'[INFO] Validated version: {version}')
+          " "$GITHUB_OUTPUT"
+
+      - name: Compute Build Matrix
+        id: set-targets
+        run: |
+          python3 -c "
+          import json, sys
+
+          targets = []
+          if '${{ inputs.build_windows }}' == 'true':
+              targets.append({'os': 'windows', 'arch': 'x64', 'runner': 'windows-latest'})
+          if '${{ inputs.build_linux }}' == 'true':
+              targets.append({'os': 'linux', 'arch': 'x86_64', 'runner': 'ubuntu-22.04'})
+          if '${{ inputs.build_macos_arm64 }}' == 'true':
+              targets.append({'os': 'macos-arm64', 'arch': 'arm64', 'runner': 'macos-latest'})
+          if '${{ inputs.build_macos_x64 }}' == 'true':
+              targets.append({'os': 'macos-x64', 'arch': 'x64', 'runner': 'macos-15-intel'})
+
+          if not targets:
+              print('ERROR: At least one build target must be selected!', file=sys.stderr)
+              sys.exit(1)
+
+          with open(sys.argv[1], 'a', encoding='utf-8') as gh_out:
+              gh_out.write(f'targets={json.dumps(targets)}\n')
+          " "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.target.os }})
+    needs: matrix-setup
+    runs-on: ${{ matrix.target.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJson(needs.matrix-setup.outputs.targets) }}
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Setup Python Environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compile Windows Executable
+        if: matrix.target.os == 'windows'
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --prefer-binary pyinstaller requests urllib3 certifi cryptography netifaces2 pyctr py7zr darkdetect PyQt6
+          python -m pip install anynet --no-deps
+
+          python -c "
+          import re
+          raw_ver = '${{ needs.matrix-setup.outputs.app_version }}'
+          digits = [int(n) for n in re.findall(r'\d+', raw_ver)][:4]
+          while len(digits) < 4:
+              digits.append(0)
+          t_ver = tuple(digits)
+          s_ver = '.'.join(str(n) for n in digits)
+
+          version_content = f'''VSVersionInfo(
+            ffi=FixedFileInfo(
+              filevers={t_ver},
+              prodvers={t_ver},
+              mask=0x3f,
+              flags=0x0,
+              OS=0x40004,
+              fileType=0x1,
+              subtype=0x0,
+              date=(0, 0)
+            ),
+            kids=[
+              StringFileInfo([
+                StringTable(
+                  '040904B0',
+                  [StringStruct('CompanyName', 'JeremKO'),
+                   StringStruct('FileDescription', 'TriCoreDownloader'),
+                   StringStruct('FileVersion', '{s_ver}'),
+                   StringStruct('InternalName', 'TriCoreDownloader'),
+                   StringStruct('LegalCopyright', 'JeremKO'),
+                   StringStruct('OriginalFilename', 'TriCoreDownloader_Windows_x64.exe'),
+                   StringStruct('ProductName', 'TriCoreDownloader'),
+                   StringStruct('ProductVersion', '{s_ver}')])
+              ]),
+              VarFileInfo([VarStruct('Translation', [1033, 1200])])
+            ]
+          )'''
+
+          with open('version_info.txt', 'w', encoding='utf-8') as f:
+              f.write(version_content)
+          "
+
+          pyinstaller --noconfirm --onefile --windowed --clean --noupx --optimize 1 `
+            --icon "icons/TriCoreDownloader.ico" `
+            --version-file "version_info.txt" `
+            --add-data "TriCoreDownloader/titles_cafe.json;TriCoreDownloader" `
+            --add-data "TriCoreDownloader/Songs;TriCoreDownloader/Songs" `
+            --add-data "TriCoreDownloader/Songs;Songs" `
+            --add-data "TriCoreDownloader/Languages;TriCoreDownloader/Languages" `
+            --add-data "icons;icons" `
+            --add-data "icons/TriCoreDownloader.png;TriCoreDownloader" `
+            --exclude-module PyQt6.QtWebEngineCore `
+            --exclude-module PyQt6.QtWebEngineWidgets `
+            --exclude-module PyQt6.QtQml `
+            --exclude-module PyQt6.QtQuick `
+            --exclude-module PyQt6.QtQuickWidgets `
+            --exclude-module PyQt6.Qt3DCore `
+            --exclude-module PyQt6.QtBluetooth `
+            --exclude-module PyQt6.QtPositioning `
+            --exclude-module PyQt6.QtPdf `
+            --exclude-module PyQt6.QtPdfWidgets `
+            --exclude-module PyQt6.QtDBus `
+            --exclude-module tkinter `
+            --collect-all cryptography `
+            --collect-all pyctr `
+            --collect-all py7zr `
+            --collect-all certifi `
+            --collect-submodules TriCoreDownloader.Languages `
+            --hidden-import netifaces2 `
+            --hidden-import darkdetect `
+            --hidden-import PyQt6.QtSvg `
+            --hidden-import PyQt6.QtMultimedia `
+            --hidden-import Updater `
+            --name "TriCoreDownloader_Windows_x64" `
+            run_TriCoreDownloader.py
+
+          if (-not (Test-Path "dist\TriCoreDownloader_Windows_x64.exe")) {
+            exit 1
+          }
+
+      - name: Upload Windows Executable
+        uses: actions/upload-artifact@v4
+        if: matrix.target.os == 'windows'
+        with:
+          name: TriCoreDownloader_Windows_x64
+          path: dist/TriCoreDownloader_Windows_x64.exe
+          retention-days: 14
+
+      - name: Install System Dependencies (Linux)
+        if: matrix.target.os == 'linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-render-util0 \
+            libxcb-shape0 \
+            libxcb-util1 \
+            libxcb-xfixes0 \
+            libxcb-xkb1 \
+            libxkbcommon-x11-0 \
+            libpulse0 \
+            libegl1 \
+            libgl1 \
+            libssl-dev \
+            wget \
+            curl \
+            file
+
+      - name: Compile Linux AppImage
+        if: matrix.target.os == 'linux'
+        run: |
+          ARCH=$(uname -m)
+          export ARCH
+
+          python3 -m pip install --upgrade pip
+          python3 -m pip install --prefer-binary pyinstaller requests urllib3 certifi cryptography netifaces2 pyctr py7zr darkdetect PyQt6
+          python3 -m pip install anynet --no-deps
+
+          pyinstaller --noconfirm --onedir --windowed --clean --noupx --optimize 1 \
+            --icon "icons/TriCoreDownloader.png" \
+            --add-data "TriCoreDownloader/titles_cafe.json:TriCoreDownloader" \
+            --add-data "TriCoreDownloader/Songs:TriCoreDownloader/Songs" \
+            --add-data "TriCoreDownloader/Songs:Songs" \
+            --add-data "TriCoreDownloader/Languages:TriCoreDownloader/Languages" \
+            --add-data "icons:icons" \
+            --add-data "icons/TriCoreDownloader.png:TriCoreDownloader" \
+            --exclude-module PyQt6.QtWebEngineCore \
+            --exclude-module PyQt6.QtWebEngineWidgets \
+            --exclude-module PyQt6.QtQml \
+            --exclude-module PyQt6.QtQuick \
+            --exclude-module PyQt6.QtQuickWidgets \
+            --exclude-module PyQt6.Qt3DCore \
+            --exclude-module PyQt6.QtBluetooth \
+            --exclude-module PyQt6.QtPositioning \
+            --exclude-module PyQt6.QtPdf \
+            --exclude-module PyQt6.QtPdfWidgets \
+            --exclude-module PyQt6.QtDBus \
+            --exclude-module tkinter \
+            --collect-all cryptography \
+            --collect-all pyctr \
+            --collect-all py7zr \
+            --collect-all certifi \
+            --collect-submodules TriCoreDownloader.Languages \
+            --hidden-import netifaces2 \
+            --hidden-import darkdetect \
+            --hidden-import PyQt6.QtSvg \
+            --hidden-import PyQt6.QtMultimedia \
+            --hidden-import Updater \
+            --name "TriCoreDownloader" \
+            run_TriCoreDownloader.py
+
+          mkdir -p AppDir/usr/bin AppDir/usr/share/icons/hicolor/256x256/apps AppDir/icons
+          cp -rv dist/TriCoreDownloader/* AppDir/usr/bin/
+          chmod +x AppDir/usr/bin/TriCoreDownloader
+
+          INTERNAL_LIB_DIR="AppDir/usr/bin/_internal"
+          if [ ! -d "$INTERNAL_LIB_DIR" ]; then
+            INTERNAL_LIB_DIR="AppDir/usr/bin"
+          fi
+          for lib in libxcb-cursor.so.0 libxcb-icccm.so.4 libxcb-image.so.0 libxcb-keysyms.so.1 libxcb-render-util.so.0 libxcb-shape.so.0 libxcb-util.so.1 libxcb-xfixes.so.0 libxcb-xkb.so.1 libxkbcommon-x11.so.0; do
+            FOUND_LIB=$(find /lib /usr/lib -name "${lib}*" 2>/dev/null | head -n 1)
+            if [ -n "$FOUND_LIB" ]; then
+              cp -Lv "$FOUND_LIB" "$INTERNAL_LIB_DIR/$lib" || true
+            fi
+          done
+
+          cp -rv icons/* AppDir/icons/
+          cp -v icons/TriCoreDownloader.png AppDir/usr/share/icons/hicolor/256x256/apps/TriCoreDownloader.png
+          cp -v icons/TriCoreDownloader.png AppDir/TriCoreDownloader.png
+          cp -v icons/TriCoreDownloader.png AppDir/.DirIcon
+
+          cat << 'EOF' > AppDir/AppRun
+          #!/bin/sh
+          SELF=$(readlink -f "$0")
+          HERE=${SELF%/*}
+          export LD_LIBRARY_PATH="$HERE/usr/bin/_internal:$HERE/usr/bin:${LD_LIBRARY_PATH}"
+          exec "$HERE/usr/bin/TriCoreDownloader" "$@"
+          EOF
+          chmod +x AppDir/AppRun
+
+          cat << EOF > AppDir/TriCoreDownloader.desktop
+          [Desktop Entry]
+          Name=TriCoreDownloader
+          Exec=TriCoreDownloader
+          Icon=TriCoreDownloader
+          Type=Application
+          Terminal=false
+          Categories=Utility;Network;
+          StartupWMClass=TriCoreDownloader
+          X-AppImage-Version=${{ needs.matrix-setup.outputs.app_version }}
+          EOF
+
+          TOOL_URL="https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${ARCH}.AppImage"
+          wget -q "${TOOL_URL}" -O appimagetool || curl -sLo appimagetool "${TOOL_URL}"
+          chmod +x appimagetool
+
+          TARGET_NAME="TriCoreDownloader_Linux_${ARCH}.AppImage"
+          mkdir -p dist
+
+          ARCH=$ARCH APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool AppDir "dist/${TARGET_NAME}" || \
+            (ARCH=$ARCH APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool AppDir && mv TriCoreDownloader*.AppImage "dist/${TARGET_NAME}")
+
+          FINAL_PATH="dist/${TARGET_NAME}"
+          if [ ! -f "${FINAL_PATH}" ]; then
+            exit 1
+          fi
+
+          echo "OUTPUT_FILE=${FINAL_PATH}" >> $GITHUB_ENV
+          echo "FINAL_NAME=${TARGET_NAME}" >> $GITHUB_ENV
+
+      - name: Upload Linux AppImage
+        uses: actions/upload-artifact@v4
+        if: matrix.target.os == 'linux'
+        with:
+          name: ${{ env.FINAL_NAME }}
+          path: ${{ env.OUTPUT_FILE }}
+          retention-days: 14
+
+      - name: Compile macOS DMG (${{ matrix.target.arch }})
+        if: startsWith(matrix.target.os, 'macos')
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "13.0"
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: |
+          brew install create-dmg
+
+          python3 -m pip install --upgrade pip
+          python3 -m pip install --prefer-binary pyinstaller requests urllib3 certifi cryptography netifaces2 pyctr py7zr darkdetect PyQt6
+          python3 -m pip install anynet --no-deps
+
+          APP_VER="${{ needs.matrix-setup.outputs.app_version }}"
+          TARGET_ARCH="${{ matrix.target.arch }}"
+
+          pyinstaller --noconfirm --onedir --windowed --clean --noupx --optimize 1 \
+            --icon "icons/TriCoreDownloader.icns" \
+            --osx-bundle-identifier "com.jeremko.tricoredownloader" \
+            --add-data "TriCoreDownloader/titles_cafe.json:TriCoreDownloader" \
+            --add-data "TriCoreDownloader/Songs:TriCoreDownloader/Songs" \
+            --add-data "TriCoreDownloader/Songs:Songs" \
+            --add-data "TriCoreDownloader/Languages:TriCoreDownloader/Languages" \
+            --add-data "icons:icons" \
+            --add-data "icons/TriCoreDownloader.png:TriCoreDownloader" \
+            --add-data "icons/TriCoreDownloader.Apple.svg:icons" \
+            --exclude-module PyQt6.QtWebEngineCore \
+            --exclude-module PyQt6.QtWebEngineWidgets \
+            --exclude-module PyQt6.QtQml \
+            --exclude-module PyQt6.QtQuick \
+            --exclude-module PyQt6.QtQuickWidgets \
+            --exclude-module PyQt6.Qt3DCore \
+            --exclude-module PyQt6.QtBluetooth \
+            --exclude-module PyQt6.QtPositioning \
+            --exclude-module PyQt6.QtPdf \
+            --exclude-module PyQt6.QtPdfWidgets \
+            --exclude-module PyQt6.QtDBus \
+            --exclude-module tkinter \
+            --collect-all cryptography \
+            --collect-all pyctr \
+            --collect-all py7zr \
+            --collect-all certifi \
+            --collect-submodules TriCoreDownloader.Languages \
+            --hidden-import netifaces2 \
+            --hidden-import darkdetect \
+            --hidden-import PyQt6.QtSvg \
+            --hidden-import PyQt6.QtMultimedia \
+            --hidden-import Updater \
+            --name "TriCoreDownloader" \
+            run_TriCoreDownloader.py
+
+          rm -rf dist/TriCoreDownloader
+          mkdir -p dist/TriCoreDownloader.app/Contents/Resources
+          cp -v icons/TriCoreDownloader.icns dist/TriCoreDownloader.app/Contents/Resources/TriCoreDownloader.icns
+
+          cat << EOF > dist/TriCoreDownloader.app/Contents/Info.plist
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleDevelopmentRegion</key>
+              <string>English</string>
+              <key>CFBundleDisplayName</key>
+              <string>TriCoreDownloader</string>
+              <key>CFBundleExecutable</key>
+              <string>TriCoreDownloader</string>
+              <key>CFBundleIconFile</key>
+              <string>TriCoreDownloader.icns</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.jeremko.tricoredownloader</string>
+              <key>CFBundleInfoDictionaryVersion</key>
+              <string>6.0</string>
+              <key>CFBundleName</key>
+              <string>TriCoreDownloader</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${APP_VER}</string>
+              <key>CFBundleVersion</key>
+              <string>${APP_VER}</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>13.0</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+              <key>NSPrincipalClass</key>
+              <string>NSApplication</string>
+          </dict>
+          </plist>
+          EOF
+
+          chmod -R +w dist/TriCoreDownloader.app
+          chmod -R +x dist/TriCoreDownloader.app/Contents/MacOS/*
+          codesign --force --deep --sign - dist/TriCoreDownloader.app
+
+          cat << 'EOF' > make_volicon.py
+          import sys, os, subprocess
+          os.environ["QT_QPA_PLATFORM"] = "offscreen"
+          from PyQt6.QtWidgets import QApplication
+          from PyQt6.QtGui import QImage, QPainter, QColor, QPen, QBrush, QLinearGradient, QRadialGradient, QPainterPath
+          from PyQt6.QtCore import Qt, QPointF, QRectF
+          from PyQt6.QtSvg import QSvgRenderer
+
+          app = QApplication(sys.argv)
+
+          TCD_GREY_LOGO = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+              <path d="M64 18 L64 82" stroke="#7B7C82" stroke-width="18" stroke-linecap="round"/>
+              <path d="M36 60 L64 88 L92 60" fill="none" stroke="#7B7C82" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M22 82 L22 100 A 8 8 0 0 0 30 108 L98 108 A 8 8 0 0 0 106 100 L106 82" fill="none" stroke="#88898E" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>"""
+
+          TCD_SHADOW_LOGO = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+              <path d="M64 18 L64 82" stroke="#5B5C61" stroke-width="18" stroke-linecap="round"/>
+              <path d="M36 60 L64 88 L92 60" fill="none" stroke="#5B5C61" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M22 82 L22 100 A 8 8 0 0 0 30 108 L98 108 A 8 8 0 0 0 106 100 L106 82" fill="none" stroke="#68696E" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>"""
+
+          TCD_WHITE_LOGO = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+              <path d="M64 18 L64 82" stroke="#FFFFFF" stroke-width="18" stroke-linecap="round"/>
+              <path d="M36 60 L64 88 L92 60" fill="none" stroke="#FFFFFF" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M22 82 L22 100 A 8 8 0 0 0 30 108 L98 108 A 8 8 0 0 0 106 100 L106 82" fill="none" stroke="#FFFFFF" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>"""
+
+          def draw_drive(size):
+              img = QImage(size, size, QImage.Format.Format_ARGB32)
+              img.fill(Qt.GlobalColor.transparent)
+              p = QPainter(img)
+              p.setRenderHint(QPainter.RenderHint.Antialiasing)
+              p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+              s = size / 512.0
+              p.scale(s, s)
+              p.setPen(Qt.PenStyle.NoPen)
+              p.setBrush(QBrush(QColor(0, 0, 0, 22)))
+              p.drawRoundedRect(QRectF(110, 100, 292, 356), 40, 40)
+              chassis_rect = QRectF(106, 40, 300, 420)
+              r = 48
+              chassis_path = QPainterPath()
+              chassis_path.addRoundedRect(chassis_rect, r, r)
+              grad = QLinearGradient(106, 40, 406, 460)
+              grad.setColorAt(0.00, QColor("#FFFFFF"))
+              grad.setColorAt(0.06, QColor("#F1F2F6"))
+              grad.setColorAt(0.22, QColor("#E1E2E7"))
+              grad.setColorAt(0.65, QColor("#C6C7CC"))
+              grad.setColorAt(0.90, QColor("#AAABB0"))
+              grad.setColorAt(1.00, QColor("#909196"))
+              p.setPen(QPen(QColor("#8E8F94"), 1.5))
+              p.setBrush(QBrush(grad))
+              p.drawPath(chassis_path)
+              p.save()
+              p.setClipPath(chassis_path)
+              top_glare = QLinearGradient(0, 40, 0, 95)
+              top_glare.setColorAt(0.0, QColor(255, 255, 255, 180))
+              top_glare.setColorAt(1.0, QColor(255, 255, 255, 0))
+              p.setPen(Qt.PenStyle.NoPen)
+              p.setBrush(QBrush(top_glare))
+              p.drawRect(QRectF(106, 40, 300, 55))
+              p.setPen(QPen(QColor("#808186"), 1.2))
+              p.drawLine(106, 402, 406, 402)
+              p.setPen(QPen(QColor("#FFFFFF"), 1.0))
+              p.drawLine(106, 403, 406, 403)
+              base_grad = QLinearGradient(0, 403, 0, 460)
+              base_grad.setColorAt(0.0, QColor(0, 0, 0, 15))
+              base_grad.setColorAt(1.0, QColor(0, 0, 0, 30))
+              p.setPen(Qt.PenStyle.NoPen)
+              p.setBrush(QBrush(base_grad))
+              p.drawRect(QRectF(106, 404, 300, 56))
+              led_x, led_y = 368, 431
+              led_glow = QRadialGradient(led_x, led_y, 8)
+              led_glow.setColorAt(0.0, QColor(255, 255, 255, 230))
+              led_glow.setColorAt(1.0, QColor(255, 255, 255, 0))
+              p.setBrush(QBrush(led_glow))
+              p.drawEllipse(QRectF(led_x - 8, led_y - 8, 16, 16))
+              p.setPen(QPen(QColor("#78797E"), 1))
+              p.setBrush(QBrush(QColor("#FFFFFF")))
+              p.drawEllipse(QRectF(led_x - 5, led_y - 5, 10, 10))
+              p.restore()
+              logo_rect = QRectF(151, 110, 210, 210)
+              p.save()
+              p.translate(0, 1.2)
+              p.setOpacity(0.85)
+              r_white = QSvgRenderer(TCD_WHITE_LOGO)
+              r_white.render(p, logo_rect)
+              p.restore()
+              p.save()
+              p.translate(0, -1.0)
+              p.setOpacity(0.25)
+              r_shadow = QSvgRenderer(TCD_SHADOW_LOGO)
+              r_shadow.render(p, logo_rect)
+              p.restore()
+              r_grey = QSvgRenderer(TCD_GREY_LOGO)
+              r_grey.render(p, logo_rect)
+              p.end()
+              return img
+
+          os.makedirs("VolumeIcon.iconset", exist_ok=True)
+          for sz in [16, 32, 128, 256, 512]:
+              draw_drive(sz).save(f"VolumeIcon.iconset/icon_{sz}x{sz}.png")
+              draw_drive(sz * 2).save(f"VolumeIcon.iconset/icon_{sz}x{sz}@2x.png")
+
+          subprocess.run(["iconutil", "-c", "icns", "VolumeIcon.iconset", "-o", "VolumeIcon.icns"], check=True)
+          EOF
+          python3 make_volicon.py
+
+          cat << 'EOF' > make_dmg_bg.py
+          import sys, os
+          sys.path.insert(0, os.path.abspath("."))
+          os.environ["QT_QPA_PLATFORM"] = "offscreen"
+          from PyQt6.QtWidgets import QApplication
+          from PyQt6.QtGui import QImage, QPainter, QColor, QPen, QBrush, QLinearGradient
+          from PyQt6.QtCore import Qt, QPointF, QRectF
+          from PyQt6.QtSvg import QSvgRenderer
+          from TriCoreDownloader.logos import TCD_MAIN_LOGO_APPLE, NX_LOGO_SVG, CTR_LOGO_BLACK_SVG, CAFE_LOGO_SVG
+
+          app = QApplication(sys.argv)
+
+          def generate_image(scale=1):
+              w, h = 800 * scale, 500 * scale
+              img = QImage(w, h, QImage.Format.Format_ARGB32)
+              dpm = int((72 * scale) / 0.0254)
+              img.setDotsPerMeterX(dpm)
+              img.setDotsPerMeterY(dpm)
+              img.fill(QColor("#F6F6F8"))
+              p = QPainter(img)
+              p.setRenderHint(QPainter.RenderHint.Antialiasing)
+              p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+              if scale != 1:
+                  p.scale(scale, scale)
+
+              grad = QLinearGradient(0, 0, 800, 0)
+              grad.setColorAt(0.0, QColor("#FF3E3E"))
+              grad.setColorAt(0.5, QColor("#00A2E8"))
+              grad.setColorAt(1.0, QColor("#C4A1FF"))
+              p.fillRect(0, 0, 800, 5, grad)
+
+              r_main = QSvgRenderer(TCD_MAIN_LOGO_APPLE)
+              r_main.render(p, QRectF(35, 30, 48, 48))
+
+              p.setPen(QPen(QColor("#E0E0E6"), 1.5))
+              p.setBrush(QBrush(QColor("#FFFFFF")))
+              p.drawRoundedRect(QRectF(605, 30, 160, 42), 21, 21)
+
+              r_nx = QSvgRenderer(NX_LOGO_SVG)
+              r_nx.render(p, QRectF(620, 38, 26, 26))
+
+              r_ctr = QSvgRenderer(CTR_LOGO_BLACK_SVG)
+              r_ctr.render(p, QRectF(672, 38, 26, 26))
+
+              r_cafe = QSvgRenderer(CAFE_LOGO_SVG)
+              r_cafe.render(p, QRectF(724, 38, 26, 26))
+
+              pen_dash = QPen(QColor("#9D65FC"), 3, Qt.PenStyle.DashLine, Qt.PenCapStyle.RoundCap)
+              p.setPen(pen_dash)
+              p.drawLine(290, 250, 480, 250)
+
+              p.setPen(QPen(QColor("#9D65FC"), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+              p.setBrush(QBrush(QColor("#9D65FC")))
+              p.drawPolygon([QPointF(495, 250), QPointF(479, 241), QPointF(479, 259)])
+              p.end()
+              return img
+
+          generate_image(1).save("dmg_bg.png")
+          generate_image(2).save("dmg_bg@2x.png")
+          EOF
+          python3 make_dmg_bg.py
+
+          tiffutil -cathidpicheck dmg_bg.png dmg_bg@2x.png -out dmg_bg.tiff
+
+          DMG_NAME="TriCoreDownloader_macOS_${TARGET_ARCH}.dmg"
+          create-dmg \
+            --volname "TriCore Downloader" \
+            --volicon "VolumeIcon.icns" \
+            --background "dmg_bg.tiff" \
+            --window-pos 110 30 \
+            --window-size 800 500 \
+            --text-size 16 \
+            --icon-size 120 \
+            --icon "TriCoreDownloader.app" 200 250 \
+            --hide-extension "TriCoreDownloader.app" \
+            --app-drop-link 600 250 \
+            --no-internet-enable \
+            "dist/${DMG_NAME}" \
+            "dist/TriCoreDownloader.app" || true
+
+          if [ ! -f "dist/${DMG_NAME}" ]; then
+            rm -f dist/rw.*.dmg
+            create-dmg \
+              --skip-jenkins \
+              --volname "TriCore Downloader" \
+              --volicon "VolumeIcon.icns" \
+              --app-drop-link 600 250 \
+              --no-internet-enable \
+              "dist/${DMG_NAME}" \
+              "dist/TriCoreDownloader.app" || true
+          fi
+
+          if [ ! -f "dist/${DMG_NAME}" ]; then
+            exit 1
+          fi
+
+          codesign --force --sign - "dist/${DMG_NAME}" || true
+
+          echo "MAC_DMG_PATH=dist/${DMG_NAME}" >> $GITHUB_ENV
+          echo "MAC_ARTIFACT_NAME=TriCoreDownloader_macOS_${TARGET_ARCH}" >> $GITHUB_ENV
+
+      - name: Upload macOS DMG (${{ matrix.target.arch }})
+        uses: actions/upload-artifact@v4
+        if: startsWith(matrix.target.os, 'macos')
+        with:
+          name: ${{ env.MAC_ARTIFACT_NAME }}
+          path: ${{ env.MAC_DMG_PATH }}
+          retention-days: 14
+
+  release:
+    name: Publish Release
+    needs: [matrix-setup, build]
+    if: inputs.publish_mode != 'Artifacts'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Resolve Release Tag
+        id: resolve-tag
+        run: |
+          if [ -n "${{ inputs.custom_tag }}" ]; then
+            TAG="${{ inputs.custom_tag }}"
+            if [[ ! "$TAG" =~ ^v ]]; then
+              TAG="v$TAG"
+            fi
+          else
+            RAW_VER="${{ needs.matrix-setup.outputs.app_version }}"
+            TAG="v${RAW_VER#v}"
+          fi
+          echo "tag_name=${TAG}" >> $GITHUB_OUTPUT
+
+      - name: Download Built Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release_assets
+          merge-multiple: true
+
+      - name: Prepare Release Notes & Checksums
+        id: prepare-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          USER_NOTES: ${{ inputs.release_notes }}
+          TAG: ${{ steps.resolve-tag.outputs.tag_name }}
+          RAW_VER: ${{ needs.matrix-setup.outputs.app_version }}
+        run: |
+          RELEASE_DATE=$(date -u +'%Y-%m-%d')
+          CLEAN_VER="${RAW_VER#v}"
+
+          CHECKSUMS=$(cd release_assets && sha256sum TriCoreDownloader*)
+
+          {
+            echo "[$CLEAN_VER] -$RELEASE_DATE"
+            echo ""
+            if [ -n "$USER_NOTES" ]; then
+              echo "$USER_NOTES"
+            else
+              NOTES=$(gh api "repos/${{ github.repository }}/releases/generate-notes" \
+                -f tag_name="$TAG" \
+                -f target_commitish="${{ github.sha }}" \
+                --jq .body 2>/dev/null || true)
+              if [ -n "$NOTES" ]; then
+                echo "$NOTES"
+              fi
+            fi
+            echo ""
+            echo "### SHA-256 Checksums"
+            echo '```text'
+            echo "$CHECKSUMS"
+            echo '```'
+          } > release_body.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.resolve-tag.outputs.tag_name }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.resolve-tag.outputs.tag_name }}
+          draft: ${{ inputs.is_draft }}
+          prerelease: ${{ inputs.publish_mode == 'Pre-release' }}
+          body_path: release_body.md
+          files: release_assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

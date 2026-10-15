@@ -1,8 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-    <rect width="128" height="128" rx="28" fill="#4A4A54"/>
-    <path d="M64 20 L64 42" stroke="#FF3E3E" stroke-width="16" stroke-linecap="round"/>
-    <path d="M64 42 L64 64" stroke="#00A2E8" stroke-width="16" stroke-linecap="round"/>
-    <path d="M64 64 L64 86" stroke="#C4A1FF" stroke-width="16" stroke-linecap="round"/>
-    <path d="M38 64 L64 90 L90 64" fill="none" stroke="#C4A1FF" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M24 82 L24 98 A 8 8 0 0 0 32 106 L96 106 A 8 8 0 0 0 104 98 L104 82" fill="none" stroke="#9595A0" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <defs>
+    <linearGradient id="pcPlateDark" x1="0" y1="0" x2="0" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#343742"/>
+      <stop offset="100%" stop-color="#1E2027"/>
+    </linearGradient>
+    <linearGradient id="pcTraySolid" x1="0" y1="82" x2="0" y2="106" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#A6ABB9"/>
+      <stop offset="100%" stop-color="#7D8290"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#pcPlateDark)"/>
+  <rect x="0.5" y="0.5" width="127" height="127" rx="27.5" fill="none" stroke="#454957" stroke-width="1"/>
+  <path d="M24 82 L24 98 A 8 8 0 0 0 32 106 L96 106 A 8 8 0 0 0 104 98 L104 82" fill="none" stroke="url(#pcTraySolid)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M64 20 L64 42" stroke="#FF3E3E" stroke-width="16" stroke-linecap="round"/>
+  <path d="M64 42 L64 64" stroke="#00A2E8" stroke-width="16" stroke-linecap="round"/>
+  <path d="M64 64 L64 78" stroke="#C4A1FF" stroke-width="16" stroke-linecap="round"/>
+  <path d="M38 64 L64 90 L90 64" fill="none" stroke="#C4A1FF" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
