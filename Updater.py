@@ -41,6 +41,23 @@ def _install_excepthook():
             return
         tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
         _tlog(f"Unhandled exception:\n{tb_str.rstrip()}", "ERROR")
+        try:
+            from PyQt6.QtWidgets import QApplication, QMessageBox
+            app = QApplication.instance()
+            created_app = False
+            if app is None:
+                app = QApplication(sys.argv)
+                created_app = True
+            err_box = QMessageBox()
+            err_box.setIcon(QMessageBox.Icon.Critical)
+            err_box.setWindowTitle("Erreur critique - TriCoreDownloader Updater")
+            err_box.setText("Une erreur inattendue s'est produite :")
+            err_box.setDetailedText(tb_str)
+            err_box.exec()
+            if created_app:
+                app.quit()
+        except Exception:
+            pass
     sys.excepthook = _hook
 
 
@@ -1920,8 +1937,13 @@ class DownloadWorkerThread(QThread):
 
         if not wait_for_main_app_exit(self.custom_dst_file, timeout=1.5):
             kill_tricoredownloader_processes(self.custom_dst_file)
-            time.sleep(0.5)
-            if is_tricoredownloader_running(self.custom_dst_file):
+            freed = False
+            for _ in range(10):
+                time.sleep(0.3)
+                if not is_tricoredownloader_running(self.custom_dst_file):
+                    freed = True
+                    break
+            if not freed:
                 _tlog("Aborting update because TriCoreDownloader is still running.", "ERROR")
                 self.completed.emit(False, self.T("err_app_running_desc"))
                 return
@@ -2005,8 +2027,13 @@ class DownloadWorkerThread(QThread):
 
             if not wait_for_main_app_exit(self.custom_dst_file, timeout=1.5):
                 kill_tricoredownloader_processes(self.custom_dst_file)
-                time.sleep(0.5)
-                if is_tricoredownloader_running(self.custom_dst_file):
+                freed = False
+                for _ in range(10):
+                    time.sleep(0.3)
+                    if not is_tricoredownloader_running(self.custom_dst_file):
+                        freed = True
+                        break
+                if not freed:
                     raise Exception(self.T("err_app_running_desc"))
 
             if self.is_frozen and self.is_dmg:
@@ -3040,8 +3067,15 @@ class UpdaterWindow(QMainWindow):
 
                 if force_box.clickedButton() == btn_yes:
                     kill_tricoredownloader_processes(target_file_to_confirm)
-                    time.sleep(0.5)
-                    if is_tricoredownloader_running(target_file_to_confirm):
+                    
+                    freed = False
+                    for _ in range(10):
+                        time.sleep(0.3)
+                        if not is_tricoredownloader_running(target_file_to_confirm):
+                            freed = True
+                            break
+                    
+                    if not freed:
                         self.status_icon_lbl.setText("❌")
                         err_box = QMessageBox(self)
                         if sys.platform != "darwin":
