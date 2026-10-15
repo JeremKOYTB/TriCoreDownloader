@@ -709,7 +709,7 @@ jobs:
               NOTES=$(gh api "repos/${{ github.repository }}/releases/generate-notes" \
                 -f tag_name="$TAG" \
                 -f target_commitish="${{ github.sha }}" \
-                --jq .body 2>/devnull || true)
+                --jq .body 2>/dev/null || true)
               if [ -n "$NOTES" ]; then
                 echo "$NOTES"
               fi
