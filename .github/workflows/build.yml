@@ -293,17 +293,6 @@ jobs:
           cp -rv dist/TriCoreDownloader/* AppDir/usr/bin/
           chmod +x AppDir/usr/bin/TriCoreDownloader
 
-          INTERNAL_LIB_DIR="AppDir/usr/bin/_internal"
-          if [ ! -d "$INTERNAL_LIB_DIR" ]; then
-            INTERNAL_LIB_DIR="AppDir/usr/bin"
-          fi
-          for lib in libxcb-cursor.so.0 libxcb-icccm.so.4 libxcb-image.so.0 libxcb-keysyms.so.1 libxcb-render-util.so.0 libxcb-shape.so.0 libxcb-util.so.1 libxcb-xfixes.so.0 libxcb-xkb.so.1 libxkbcommon-x11.so.0; do
-            FOUND_LIB=$(find /lib /usr/lib -name "${lib}*" 2>/dev/null | head -n 1)
-            if [ -n "$FOUND_LIB" ]; then
-              cp -Lv "$FOUND_LIB" "$INTERNAL_LIB_DIR/$lib" || true
-            fi
-          done
-
           cp -rv icons/* AppDir/icons/
           cp -v icons/TriCoreDownloader.png AppDir/usr/share/icons/hicolor/256x256/apps/TriCoreDownloader.png
           cp -v icons/TriCoreDownloader.png AppDir/TriCoreDownloader.png
@@ -720,7 +709,7 @@ jobs:
               NOTES=$(gh api "repos/${{ github.repository }}/releases/generate-notes" \
                 -f tag_name="$TAG" \
                 -f target_commitish="${{ github.sha }}" \
-                --jq .body 2>/dev/null || true)
+                --jq .body 2>/devnull || true)
               if [ -n "$NOTES" ]; then
                 echo "$NOTES"
               fi
