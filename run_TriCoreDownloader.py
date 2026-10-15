@@ -168,10 +168,14 @@ def _setup_logging_mode():
         except Exception:
             pass
 
-    is_maintenance = any(
-        arg in sys.argv for arg in ["--clean-cache", "--clean-pycache", "--clean-save", "--clean-data"]
-    )
-    if is_maintenance:
+    is_maintenance_or_updater = any(
+        arg in sys.argv for arg in [
+            "--clean-cache", "--clean-pycache", "--clean-save", "--clean-data",
+            "--updater", "--relocated"
+        ]
+    ) or os.environ.get("TCD_UPDATER_RELOCATED") == "1"
+
+    if is_maintenance_or_updater:
         return
 
     advanced_logs = False
@@ -643,6 +647,9 @@ sys.excepthook = crash_handler
 
 
 def cleanup_temp_updater():
+    if "--updater" in sys.argv or "--relocated" in sys.argv or os.environ.get("TCD_UPDATER_RELOCATED") == "1":
+        return
+
     appdata = _get_appdata_directory()
     targets = [
         os.path.join(appdata, "TempUpdater.app"),
@@ -720,7 +727,7 @@ def install_desktop_integration():
     if platform.system() != "Linux":
         return
 
-    if "--updater" in sys.argv:
+    if "--updater" in sys.argv or "--relocated" in sys.argv:
         return
 
     try:
@@ -820,116 +827,16 @@ def _get_mac_bundle_from_path(path):
     return abs_path
 
 
-def _launch_updater_mode(app, app_version):
-    from Updater import UpdaterWindow, get_app_dir
-
-    is_frozen = getattr(sys, "frozen", False)
-    appdata_dir = get_app_dir()
-
-    if is_frozen:
-        if sys.platform == "darwin":
-            exe_abs = os.path.abspath(sys.executable)
-            app_bundle = _get_mac_bundle_from_path(exe_abs)
-            if app_bundle.endswith(".app"):
-                temp_bundle = os.path.join(appdata_dir, "TempUpdater.app")
-                if os.path.normcase(app_bundle) != os.path.normcase(temp_bundle):
-                    try:
-                        os.makedirs(appdata_dir, exist_ok=True)
-                        if os.path.exists(temp_bundle):
-                            shutil.rmtree(temp_bundle, ignore_errors=True)
-                        subprocess.run(["ditto", app_bundle, temp_bundle], check=True)
-
-                        exe_name = os.path.basename(exe_abs)
-                        temp_exe = os.path.join(temp_bundle, "Contents", "MacOS", exe_name)
-                        if not os.path.exists(temp_exe):
-                            temp_exe = os.path.join(temp_bundle, "Contents", "MacOS", "TriCoreDownloader")
-
-                        args = [temp_exe, "--updater"]
-                        passed_args = [a for a in sys.argv[1:] if a != "--updater"]
-                        if "--install-dir" not in passed_args:
-                            args.extend(["--install-dir", app_bundle])
-                        if "--original-target" not in passed_args:
-                            args.extend(["--original-target", app_bundle])
-                        args.extend(passed_args)
-
-                        clean_env = os.environ.copy()
-                        clean_env.pop("_MEIPASS2", None)
-                        clean_env.pop("_MEIPASS", None)
-
-                        subprocess.Popen(
-                            args,
-                            stdin=subprocess.DEVNULL,
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            env=clean_env,
-                            cwd=os.path.expanduser("~"),
-                            start_new_session=True,
-                        )
-                        os._exit(0)
-                    except Exception as e:
-                        logger.error(f"macOS updater: {e}")
-        else:
-            exe_ext = ".exe" if sys.platform == "win32" else ""
-            temp_updater_exe = os.path.join(appdata_dir, f"TempUpdater{exe_ext}")
-
-            appimage_env = os.environ.get("ORIGINAL_APPIMAGE") or os.environ.get("APPIMAGE")
-            if appimage_env and os.path.exists(appimage_env) and "tempupdater" not in os.path.basename(appimage_env).lower():
-                src_exe = os.path.abspath(appimage_env)
-            else:
-                src_exe = os.path.abspath(sys.executable)
-
-            actual_install_dir = os.path.dirname(src_exe)
-
-            if os.path.normcase(src_exe) != os.path.normcase(temp_updater_exe):
-                try:
-                    os.makedirs(appdata_dir, exist_ok=True)
-                    tmp_copy = temp_updater_exe + ".tmp"
-                    shutil.copy2(src_exe, tmp_copy)
-                    if sys.platform != "win32":
-                        st = os.stat(tmp_copy)
-                        os.chmod(tmp_copy, st.st_mode | stat.S_IEXEC | 0o755)
-                    os.replace(tmp_copy, temp_updater_exe)
-
-                    args = [temp_updater_exe, "--updater"]
-                    passed_args = [a for a in sys.argv[1:] if a != "--updater"]
-                    if "--install-dir" not in passed_args:
-                        args.extend(["--install-dir", actual_install_dir])
-                    if "--original-target" not in passed_args:
-                        args.extend(["--original-target", src_exe])
-                    args.extend(passed_args)
-
-                    clean_env = os.environ.copy()
-                    clean_env.pop("_MEIPASS2", None)
-                    clean_env.pop("_MEIPASS", None)
-                    clean_env.pop("APPDIR", None)
-                    if sys.platform.startswith("linux") and "tempupdater" not in os.path.basename(src_exe).lower():
-                        clean_env["ORIGINAL_APPIMAGE"] = src_exe
-
-                    kwargs = {
-                        "stdin": subprocess.DEVNULL,
-                        "stdout": subprocess.DEVNULL,
-                        "stderr": subprocess.DEVNULL,
-                        "env": clean_env,
-                        "cwd": os.path.expanduser("~"),
-                    }
-                    if os.name == "nt":
-                        kwargs["creationflags"] = 0x00000008 | 0x00000200
-                    else:
-                        kwargs["start_new_session"] = True
-
-                    subprocess.Popen(args, **kwargs)
-                    os._exit(0)
-                except Exception as e:
-                    logger.error(f"Updater: {e}")
-    else:
+def _launch_updater_mode(app=None, app_version=None):
+    if not getattr(sys, "frozen", False):
         if "--install-dir" not in sys.argv:
             sys.argv.extend(["--install-dir", base_dir])
         if "--original-target" not in sys.argv:
             sys.argv.extend(["--original-target", os.path.abspath(__file__)])
 
-    window = UpdaterWindow(app_version)
-    window.show()
-    os._exit(app.exec())
+    import Updater
+    Updater._relocate_and_relaunch_if_needed()
+    Updater.main()
 
 
 def main():
@@ -940,6 +847,10 @@ def main():
         execute_clean_save_cli()
 
     check_macos_compatibility()
+
+    if "--updater" in sys.argv:
+        _launch_updater_mode()
+        return
 
     logger.info(lang_dict.get("STARTING", "Starting..."))
 
@@ -982,9 +893,6 @@ def main():
         pix = _svg_bytes_to_qpixmap(TCD_MAIN_LOGO, 256, 256)
         if not pix.isNull():
             app.setWindowIcon(QIcon(pix))
-
-    if "--updater" in sys.argv:
-        _launch_updater_mode(app, APP_VERSION)
 
     if platform.system() in ["Darwin", "Linux"]:
         try:
