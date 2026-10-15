@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import datetime
 import subprocess
 import json
@@ -856,6 +857,14 @@ class UiInteractionsMixin:
         clean_env.pop("ARGV0", None)
 
         if sys.platform.startswith("linux"):
+            if "LD_LIBRARY_PATH_ORIG" in clean_env:
+                clean_env["LD_LIBRARY_PATH"] = clean_env.pop("LD_LIBRARY_PATH_ORIG")
+            else:
+                clean_env.pop("LD_LIBRARY_PATH", None)
+            clean_env.pop("QT_PLUGIN_PATH", None)
+            clean_env.pop("QML2_IMPORT_PATH", None)
+            clean_env.pop("PYTHONPATH", None)
+            clean_env.pop("PYTHONHOME", None)
             clean_env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
 
         is_frozen = getattr(sys, "frozen", False)
@@ -894,8 +903,9 @@ class UiInteractionsMixin:
             if is_frozen:
                 appimage_env = os.environ.get("ORIGINAL_APPIMAGE") or os.environ.get("APPIMAGE")
                 if appimage_env and os.path.exists(appimage_env):
-                    exe_target = appimage_env
-                    work_dir = os.path.dirname(appimage_env)
+                    exe_target = os.path.abspath(appimage_env)
+                    work_dir = os.path.dirname(exe_target)
+                    clean_env["ORIGINAL_APPIMAGE"] = exe_target
                 else:
                     exe_target = os.path.abspath(sys.executable)
                     work_dir = os.path.dirname(exe_target)
@@ -924,6 +934,59 @@ class UiInteractionsMixin:
             kwargs["creationflags"] = 0x00000008 | 0x00000200
         else:
             kwargs["start_new_session"] = True
+
+        if sys.platform.startswith("linux"):
+            launched_ok = False
+            proc = None
+            try:
+                proc = subprocess.Popen(args_list, **kwargs)
+                for _ in range(15):
+                    QApplication.processEvents()
+                    time.sleep(0.1)
+                    if proc.poll() is not None:
+                        break
+                if proc.poll() is None and os.path.exists(f"/proc/{proc.pid}"):
+                    launched_ok = True
+            except Exception:
+                launched_ok = False
+
+            if not launched_ok and is_frozen:
+                try:
+                    fallback_env = clean_env.copy()
+                    fallback_env.pop("APPIMAGE_EXTRACT_AND_RUN", None)
+                    fallback_kwargs = dict(kwargs)
+                    fallback_kwargs["env"] = fallback_env
+                    proc = subprocess.Popen(args_list, **fallback_kwargs)
+                    for _ in range(15):
+                        QApplication.processEvents()
+                        time.sleep(0.1)
+                        if proc.poll() is not None:
+                            break
+                    if proc.poll() is None and os.path.exists(f"/proc/{proc.pid}"):
+                        launched_ok = True
+                except Exception as e:
+                    if hasattr(self, "console_write"):
+                        self.console_write(f"[ERROR] Échec du redémarrage : {e}\n")
+
+            if not launched_ok:
+                self._is_restarting = False
+                if hasattr(self, "app_lock"):
+                    try:
+                        self.app_lock.tryLock(100)
+                    except Exception:
+                        pass
+                if hasattr(self, "console_write"):
+                    self.console_write("[ERROR] Échec du redémarrage : le nouveau processus ne s'est pas lancé.\n")
+                return
+
+            self.hide()
+            QApplication.processEvents()
+            time.sleep(0.15)
+            self.close()
+            app = QApplication.instance()
+            if app:
+                app.quit()
+            return
 
         try:
             subprocess.Popen(args_list, **kwargs)
