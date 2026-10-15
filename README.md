@@ -23,9 +23,9 @@ It is designed for software preservation, enabling you to install files on eithe
 
 ---
 
-## Pre-compiled Binaries (Version 1.1.0+) 👀
+## Pre-compiled Binaries (Version 2.0.0+) 👀
 
-Starting with version 1.1.0, **TriCoreDownloader** is now fully compiled and ready to use! You no longer need to bother with setting up Python and its dependencies. Ready-to-use binaries are provided for:
+Starting with version 2.0.0, **TriCoreDownloader** is now fully compiled and ready to use! You no longer need to bother with setting up Python and its dependencies. Ready-to-use binaries are provided for:
 * **Windows x64**
 * **macOS (Intel & Apple Silicon)**
 * **Linux x64 (AppImage)**
