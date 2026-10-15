@@ -256,7 +256,18 @@ class FirmwareApp(DownloadManagerMixin, FirmwareAppUI, UiInteractionsMixin):
                 self.btn_update = QPushButton(self.T("btn_update"))
                 self.btn_update.setObjectName("btnHeader")
                 self.btn_update.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-                self.btn_update.clicked.connect(self.manual_check_updates)
+                
+                def _on_header_update_clicked():
+                    from .custom_widgets import launch_updater
+                    try:
+                        launch_updater(self, getattr(self, "T", None))
+                    except TypeError:
+                        try:
+                            launch_updater(self)
+                        except TypeError:
+                            launch_updater()
+                
+                self.btn_update.clicked.connect(_on_header_update_clicked)
 
                 self.update_right_layout.addWidget(self.lbl_update_spinner, alignment=Qt.AlignmentFlag.AlignVCenter)
                 self.update_right_layout.addWidget(self.btn_update, alignment=Qt.AlignmentFlag.AlignVCenter)
