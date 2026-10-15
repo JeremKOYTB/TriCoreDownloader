@@ -293,8 +293,10 @@ def _relocate_and_relaunch_if_needed():
             clean_env.pop(var, None)
 
         clean_env["TCD_UPDATER_RELOCATED"] = "1"
-        if is_frozen and sys.platform.startswith("linux") and "tempupdater" not in os.path.basename(src_target).lower():
-            clean_env["ORIGINAL_APPIMAGE"] = src_target
+        if is_frozen and sys.platform.startswith("linux"):
+            clean_env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
+            if "tempupdater" not in os.path.basename(src_target).lower():
+                clean_env["ORIGINAL_APPIMAGE"] = src_target
 
         has_tty = _has_valid_std_stream()
         kwargs = {
@@ -315,12 +317,19 @@ def _relocate_and_relaunch_if_needed():
             kwargs["start_new_session"] = True
             kwargs["close_fds"] = True
 
+        if sys.platform != "win32" and os.path.exists(temp_updater):
+            try:
+                st = os.stat(temp_updater)
+                os.chmod(temp_updater, st.st_mode | stat.S_IEXEC | 0o755)
+            except Exception:
+                pass
+
         _tlog(f"Launching relocated updater process: {' '.join(args)}")
         proc = subprocess.Popen(args, **kwargs)
 
         alive = False
-        for _ in range(6):
-            time.sleep(0.04)
+        for _ in range(15):
+            time.sleep(0.1)
             if proc.poll() is not None:
                 break
         else:
