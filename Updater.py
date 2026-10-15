@@ -35,6 +35,28 @@ def _tlog(msg, level="INFO"):
         pass
 
 
+def _get_clean_linux_env(base_env=None):
+    env = (base_env if base_env is not None else os.environ).copy()
+    for var in (
+        "_MEIPASS", "_MEIPASS2", "APPDIR", "APPIMAGE", "OWD", "ARGV0",
+        "LD_LIBRARY_PATH", "LD_LIBRARY_PATH_ORIG", "LD_PRELOAD",
+        "PYTHONHOME", "PYTHONPATH", "PYINSTALLER_RESET_ENVIRONMENT",
+        "QT_PLUGIN_PATH", "QML2_IMPORT_PATH"
+    ):
+        env.pop(var, None)
+    for env_key in ("PATH", "XDG_DATA_DIRS", "GI_TYPELIB_PATH", "GST_PLUGIN_SYSTEM_PATH", "GST_PLUGIN_PATH"):
+        if env_key in env:
+            filtered = [
+                p for p in env[env_key].split(os.pathsep)
+                if p and not p.startswith(("/tmp/.mount_", "/tmp/_MEI", "/tmp/appimage_extracted_"))
+            ]
+            if filtered:
+                env[env_key] = os.pathsep.join(filtered)
+            else:
+                env.pop(env_key, None)
+    return env
+
+
 def _install_excepthook():
     def _hook(exc_type, exc_value, exc_tb):
         if issubclass(exc_type, KeyboardInterrupt):
@@ -195,6 +217,14 @@ def _relocate_and_relaunch_if_needed():
         or os.environ.get("TCD_UPDATER_RELOCATED") == "1"
     )
 
+    arg_orig_target = ""
+    if "--original-target" in sys.argv:
+        try:
+            idx = sys.argv.index("--original-target")
+            arg_orig_target = os.path.abspath(sys.argv[idx + 1])
+        except IndexError:
+            arg_orig_target = ""
+
     if is_frozen:
         if sys.platform == "darwin":
             mac_app = get_mac_app_bundle_path(sys.executable)
@@ -234,6 +264,8 @@ def _relocate_and_relaunch_if_needed():
 
             if orig_appimage and os.path.exists(orig_appimage) and "tempupdater" not in os.path.basename(orig_appimage).lower():
                 src_target = os.path.abspath(orig_appimage)
+            elif arg_orig_target and os.path.exists(arg_orig_target) and "tempupdater" not in os.path.basename(arg_orig_target).lower():
+                src_target = arg_orig_target
             elif current_appimage and os.path.exists(current_appimage) and "tempupdater" not in os.path.basename(current_appimage).lower():
                 src_target = os.path.abspath(current_appimage)
             else:
@@ -301,13 +333,16 @@ def _relocate_and_relaunch_if_needed():
 
         args.extend(passed_args)
 
-        clean_env = os.environ.copy()
-        for var in (
-            "_MEIPASS", "_MEIPASS2", "APPDIR", "APPIMAGE", "OWD", "ARGV0",
-            "LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONHOME", "PYTHONPATH",
-            "QT_PLUGIN_PATH", "QML2_IMPORT_PATH"
-        ):
-            clean_env.pop(var, None)
+        if sys.platform.startswith("linux"):
+            clean_env = _get_clean_linux_env()
+        else:
+            clean_env = os.environ.copy()
+            for var in (
+                "_MEIPASS", "_MEIPASS2", "APPDIR", "APPIMAGE", "OWD", "ARGV0",
+                "LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONHOME", "PYTHONPATH",
+                "QT_PLUGIN_PATH", "QML2_IMPORT_PATH"
+            ):
+                clean_env.pop(var, None)
 
         clean_env["TCD_UPDATER_RELOCATED"] = "1"
         if sys.platform.startswith("linux"):
@@ -345,7 +380,7 @@ def _relocate_and_relaunch_if_needed():
         proc = subprocess.Popen(args, **kwargs)
 
         alive = False
-        for _ in range(15):
+        for _ in range(16):
             time.sleep(0.1)
             if proc.poll() is not None:
                 break
@@ -353,12 +388,13 @@ def _relocate_and_relaunch_if_needed():
             alive = True
 
         if not alive and is_frozen and sys.platform.startswith("linux"):
-            _tlog(f"Relocated AppImage exited early (code={proc.returncode}), retrying with APPIMAGE_EXTRACT_AND_RUN=1...", "WARN")
-            clean_env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
-            kwargs["env"] = clean_env
+            _tlog(f"Relocated AppImage exited early (code={proc.returncode}), retrying without APPIMAGE_EXTRACT_AND_RUN...", "WARN")
+            fallback_env = clean_env.copy()
+            fallback_env.pop("APPIMAGE_EXTRACT_AND_RUN", None)
+            kwargs["env"] = fallback_env
             proc = subprocess.Popen(args, **kwargs)
-            for _ in range(8):
-                time.sleep(0.05)
+            for _ in range(16):
+                time.sleep(0.1)
                 if proc.poll() is not None:
                     break
             else:
@@ -647,7 +683,13 @@ def is_tricoredownloader_running(target_file=None):
                 pass
 
         try:
-            out = subprocess.check_output(["ps", "-eo", "pid=,args="], text=True, timeout=2, stderr=subprocess.DEVNULL)
+            out = subprocess.check_output(
+                ["ps", "-eo", "pid=,args="],
+                text=True,
+                timeout=2,
+                stderr=subprocess.DEVNULL,
+                env=_get_clean_linux_env()
+            )
             for line in out.splitlines():
                 parts = line.strip().split(None, 1)
                 if len(parts) < 2:
@@ -725,13 +767,16 @@ def kill_tricoredownloader_processes(target_file=None):
                 try:
                     with open(f"/proc/{pid}/cmdline", "rb") as f:
                         raw_cmd = f.read().replace(b"\x00", b" ").decode("utf-8", errors="ignore").strip().lower()
+                    if "tempupdater" in raw_cmd or "updater.py" in raw_cmd or "--updater" in raw_cmd or "--relocated" in raw_cmd:
+                        continue
                     if ("run_tricoredownloader.py" in raw_cmd or "tricoredownloader" in raw_cmd) and "updater" not in raw_cmd:
                         os.kill(pid, signal.SIGKILL)
                         _tlog(f"Killed Linux process PID {pid}")
                 except Exception:
                     pass
         else:
-            out = subprocess.check_output(["ps", "-ax", "-o", "pid=,command="], text=True, stderr=subprocess.DEVNULL)
+            ps_env = _get_clean_linux_env() if sys.platform.startswith("linux") else None
+            out = subprocess.check_output(["ps", "-ax", "-o", "pid=,command="], text=True, stderr=subprocess.DEVNULL, env=ps_env)
             target_norm = os.path.abspath(target_file).lower() if target_file else ""
             for line in out.splitlines():
                 parts = line.strip().split(None, 1)
@@ -740,7 +785,7 @@ def kill_tricoredownloader_processes(target_file=None):
                     if pid in ignored_pids:
                         continue
                     cmd = parts[1].lower()
-                    if "tempupdater" in cmd or "updater.py" in cmd or "--updater" in cmd:
+                    if "tempupdater" in cmd or "updater.py" in cmd or "--updater" in cmd or "--relocated" in cmd:
                         continue
                     if ("run_tricoredownloader.py" in cmd or "tricoredownloader" in cmd or (target_norm and target_norm in cmd)) and "updater" not in cmd:
                         try:
@@ -3281,20 +3326,23 @@ class UpdaterWindow(QMainWindow):
                 except Exception:
                     pass
 
-            env = os.environ.copy()
             exec_dir = os.path.dirname(target) if target.endswith(".app") else (
                 base_dir if os.path.isdir(base_dir) and not base_dir.endswith(".app") else os.path.dirname(target)
             )
 
-            for clean_var in (
-                "APPDIR", "APPIMAGE", "OWD", "ARGV0",
-                "_MEIPASS", "_MEIPASS2", "ORIGINAL_APPIMAGE", "TCD_UPDATER_RELOCATED",
-                "LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONHOME", "QT_PLUGIN_PATH", "QML2_IMPORT_PATH"
-            ):
-                env.pop(clean_var, None)
-
             if sys.platform.startswith("linux"):
+                env = _get_clean_linux_env()
+                env.pop("ORIGINAL_APPIMAGE", None)
+                env.pop("TCD_UPDATER_RELOCATED", None)
                 env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
+            else:
+                env = os.environ.copy()
+                for clean_var in (
+                    "APPDIR", "APPIMAGE", "OWD", "ARGV0",
+                    "_MEIPASS", "_MEIPASS2", "ORIGINAL_APPIMAGE", "TCD_UPDATER_RELOCATED",
+                    "LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONHOME", "QT_PLUGIN_PATH", "QML2_IMPORT_PATH"
+                ):
+                    env.pop(clean_var, None)
 
             is_python_script = target.lower().endswith(".py")
             if is_python_script:
@@ -3331,15 +3379,98 @@ class UpdaterWindow(QMainWindow):
             else:
                 if is_python_script:
                     py_exec = self._find_python_for_source_launch(exec_dir)
-                    subprocess.Popen([py_exec, target], env=env, start_new_session=True, cwd=exec_dir, close_fds=True)
+                    cmd_list = [py_exec, target]
                 else:
-                    proc = subprocess.Popen([target], env=env, start_new_session=True, cwd=exec_dir, close_fds=True)
-                    if target.lower().endswith(".appimage"):
-                        time.sleep(0.15)
-                        if proc.poll() is not None and proc.returncode != 0:
-                            _tlog("AppImage launch failed (FUSE unavailable), relaunching with APPIMAGE_EXTRACT_AND_RUN=1...", "WARN")
-                            env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
-                            subprocess.Popen([target], env=env, start_new_session=True, cwd=exec_dir, close_fds=True)
+                    cmd_list = [target]
+
+                debug_log_path = os.path.join(get_app_dir(), "linux_relaunch_debug.log")
+                error_reasons = []
+
+                def _try_linux_relaunch(spawn_env, label):
+                    log_file = None
+                    try:
+                        os.makedirs(get_app_dir(), exist_ok=True)
+                        log_file = open(debug_log_path, "w+", encoding="utf-8", errors="replace")
+                    except Exception:
+                        log_file = None
+
+                    local_kwargs = {
+                        "env": spawn_env,
+                        "start_new_session": True,
+                        "cwd": exec_dir,
+                        "close_fds": True,
+                        "stdin": subprocess.DEVNULL,
+                        "stdout": log_file if log_file is not None else subprocess.DEVNULL,
+                        "stderr": subprocess.STDOUT if log_file is not None else subprocess.DEVNULL,
+                    }
+
+                    try:
+                        proc = subprocess.Popen(cmd_list, **local_kwargs)
+                        for _ in range(15):
+                            QApplication.processEvents()
+                            time.sleep(0.1)
+                            if proc.poll() is not None:
+                                break
+                        if proc.poll() is None and os.path.exists(f"/proc/{proc.pid}"):
+                            if log_file is not None:
+                                try:
+                                    log_file.close()
+                                except Exception:
+                                    pass
+                            return True
+                        rc = proc.returncode
+                        out_txt = ""
+                        if log_file is not None:
+                            try:
+                                log_file.flush()
+                                log_file.seek(0)
+                                out_txt = log_file.read().strip()
+                                log_file.close()
+                            except Exception:
+                                pass
+                        error_reasons.append(f"{label}: process exited prematurely with code {rc}.\nOutput:\n{out_txt or '<no output>'}")
+                        return False
+                    except Exception as exc:
+                        out_txt = ""
+                        if log_file is not None:
+                            try:
+                                log_file.flush()
+                                log_file.seek(0)
+                                out_txt = log_file.read().strip()
+                                log_file.close()
+                            except Exception:
+                                pass
+                        error_reasons.append(f"{label}: exception {repr(exc)}.\nOutput:\n{out_txt or '<no output>'}")
+                        return False
+
+                launched_ok = _try_linux_relaunch(env, "Attempt 1 (APPIMAGE_EXTRACT_AND_RUN=1)")
+
+                if not launched_ok and not is_python_script:
+                    _tlog("Attempt 1 failed, retrying without APPIMAGE_EXTRACT_AND_RUN...", "WARN")
+                    fallback_env = env.copy()
+                    fallback_env.pop("APPIMAGE_EXTRACT_AND_RUN", None)
+                    launched_ok = _try_linux_relaunch(fallback_env, "Attempt 2 (Standard execution)")
+
+                if not launched_ok:
+                    details = (
+                        f"Unable to relaunch TriCoreDownloader.\n\n"
+                        f"Target executable: {target} (exists={os.path.exists(target)})\n"
+                        f"Command: {' '.join(cmd_list)}\n"
+                        f"Working directory: {exec_dir}\n\n"
+                        + "\n\n".join(error_reasons)
+                    )
+                    _tlog(details, "ERROR")
+                    err_box = QMessageBox(self)
+                    if sys.platform != "darwin":
+                        err_box.setWindowIcon(self.get_app_icon())
+                    err_box.setIcon(QMessageBox.Icon.Critical)
+                    err_box.setWindowTitle("Error")
+                    err_box.setText(details)
+                    err_box.exec()
+                else:
+                    self.hide()
+                    QApplication.processEvents()
+                    time.sleep(0.15)
 
         except Exception as e:
             _tlog(f"Error while relaunching main app: {e}", "ERROR")
