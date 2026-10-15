@@ -50,8 +50,8 @@ def _install_excepthook():
                 created_app = True
             err_box = QMessageBox()
             err_box.setIcon(QMessageBox.Icon.Critical)
-            err_box.setWindowTitle("Erreur critique - TriCoreDownloader Updater")
-            err_box.setText("Une erreur inattendue s'est produite :")
+            err_box.setWindowTitle("TriCoreDownloader Updater")
+            err_box.setText("An unexpected error occurred")
             err_box.setDetailedText(tb_str)
             err_box.exec()
             if created_app:
