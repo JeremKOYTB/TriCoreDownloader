@@ -765,6 +765,10 @@ def launch_updater(parent_window=None, tr_func=None):
             base_dir = os.path.dirname(current_exe)
             orig_target = current_exe
 
+        # Correction : Assure la transmission correcte des variables d'environnement sous Linux AppImage
+        if sys.platform.startswith("linux"):
+            clean_env["ORIGINAL_APPIMAGE"] = orig_target
+
         args = [current_exe, "--updater", "--install-dir", base_dir, "--original-target", orig_target]
         kwargs = {
             "cwd": os.path.expanduser("~"),
