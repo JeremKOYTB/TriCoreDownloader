@@ -678,6 +678,65 @@ def is_tricoredownloader_running(target_file=None):
     return False
 
 
+def kill_tricoredownloader_processes(target_file=None):
+    """Force fermer toutes les instances de TriCoreDownloader exécutées."""
+    current_pid = os.getpid()
+    parent_pid = os.getppid() if hasattr(os, "getppid") else -1
+    ignored_pids = {current_pid, parent_pid}
+
+    _tlog("Attempting to force kill running TriCoreDownloader instances...", "WARN")
+
+    if sys.platform == "win32":
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/FI", "IMAGENAME eq tricoredownloader*"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=0x08000000
+            )
+        except Exception as e:
+            _tlog(f"taskkill failed: {e}", "WARN")
+        return
+
+    # Linux & macOS
+    try:
+        if sys.platform.startswith("linux") and os.path.isdir("/proc"):
+            for entry in os.listdir("/proc"):
+                if not entry.isdigit():
+                    continue
+                pid = int(entry)
+                if pid in ignored_pids:
+                    continue
+                try:
+                    with open(f"/proc/{pid}/cmdline", "rb") as f:
+                        raw_cmd = f.read().replace(b"\x00", b" ").decode("utf-8", errors="ignore").strip().lower()
+                    if ("run_tricoredownloader.py" in raw_cmd or "tricoredownloader" in raw_cmd) and "updater" not in raw_cmd:
+                        os.kill(pid, signal.SIGKILL)
+                        _tlog(f"Killed Linux process PID {pid}")
+                except Exception:
+                    pass
+        else:
+            out = subprocess.check_output(["ps", "-ax", "-o", "pid=,command="], text=True, stderr=subprocess.DEVNULL)
+            target_norm = os.path.abspath(target_file).lower() if target_file else ""
+            for line in out.splitlines():
+                parts = line.strip().split(None, 1)
+                if len(parts) >= 2 and parts[0].isdigit():
+                    pid = int(parts[0])
+                    if pid in ignored_pids:
+                        continue
+                    cmd = parts[1].lower()
+                    if "tempupdater" in cmd or "updater.py" in cmd or "--updater" in cmd:
+                        continue
+                    if ("run_tricoredownloader.py" in cmd or "tricoredownloader" in cmd or (target_norm and target_norm in cmd)) and "updater" not in cmd:
+                        try:
+                            os.kill(pid, signal.SIGKILL)
+                            _tlog(f"Killed process PID {pid}")
+                        except Exception:
+                            pass
+    except Exception as e:
+        _tlog(f"Error while force killing processes: {e}", "WARN")
+
+
 def wait_for_main_app_exit(target_file=None, timeout=3.5):
     if not is_tricoredownloader_running(target_file):
         return True
@@ -846,6 +905,8 @@ LOCALES = {
         "err_permission_denied": "Permissions insuffisantes : Impossible d'écrire dans le dossier d'installation ({0}). Veuillez vérifier vos droits d'accès.",
         "err_app_running_title": "Application ouverte",
         "err_app_running_desc": "TriCoreDownloader est actuellement en cours d'exécution.\n\nVeuillez fermer l'application avant de continuer la mise à jour.",
+        "force_close_title": "Fermer de force l'application ?",
+        "force_close_desc": "TriCoreDownloader est toujours ouvert ou semble ne pas répondre.\n\nVoulez-vous forcer sa fermeture pour continuer la mise à jour ?",
         "err_dmg_corrupt": "L'image disque DMG est corrompue (TriCoreDownloader.app est introuvable à l'intérieur).",
         "err_not_in_applications": "Échec de la mise à jour : TriCoreDownloader.app est introuvable dans le dossier cible.",
         "confirm_target_title": "Confirmation de l'emplacement",
@@ -931,6 +992,8 @@ LOCALES = {
         "err_permission_denied": "Insufficient permissions: Cannot write to installation directory ({0}). Please check your permissions.",
         "err_app_running_title": "Application Running",
         "err_app_running_desc": "TriCoreDownloader is currently running.\n\nPlease close the application before proceeding with the update.",
+        "force_close_title": "Force Close Application?",
+        "force_close_desc": "TriCoreDownloader is still open or appears to be frozen.\n\nDo you want to force close it to proceed with the update?",
         "err_dmg_corrupt": "The DMG disk image is corrupted (TriCoreDownloader.app was not found inside).",
         "err_not_in_applications": "Update failed: TriCoreDownloader.app was not found in the target folder.",
         "confirm_target_title": "Confirm Target Location",
@@ -1857,10 +1920,13 @@ class DownloadWorkerThread(QThread):
             self.completed.emit(False, self.T("err_permission_denied").format(check_dir))
             return
 
-        if not wait_for_main_app_exit(self.custom_dst_file):
-            _tlog("Aborting update because TriCoreDownloader is still running.", "ERROR")
-            self.completed.emit(False, self.T("err_app_running_desc"))
-            return
+        if not wait_for_main_app_exit(self.custom_dst_file, timeout=1.5):
+            kill_tricoredownloader_processes(self.custom_dst_file)
+            time.sleep(0.5)
+            if is_tricoredownloader_running(self.custom_dst_file):
+                _tlog("Aborting update because TriCoreDownloader is still running.", "ERROR")
+                self.completed.emit(False, self.T("err_app_running_desc"))
+                return
 
         temp_download_path = os.path.join(get_app_dir(), f"TCD_Download_Temp_{os.getpid()}.bin")
         temp_extract_dir = os.path.join(get_app_dir(), f"TCD_Extract_Temp_{os.getpid()}")
@@ -1939,8 +2005,11 @@ class DownloadWorkerThread(QThread):
 
             self.progress_val.emit(100)
 
-            if not wait_for_main_app_exit(self.custom_dst_file):
-                raise Exception(self.T("err_app_running_desc"))
+            if not wait_for_main_app_exit(self.custom_dst_file, timeout=1.5):
+                kill_tricoredownloader_processes(self.custom_dst_file)
+                time.sleep(0.5)
+                if is_tricoredownloader_running(self.custom_dst_file):
+                    raise Exception(self.T("err_app_running_desc"))
 
             if self.is_frozen and self.is_dmg:
                 self._extract_dmg(temp_download_path)
@@ -2958,16 +3027,34 @@ class UpdaterWindow(QMainWindow):
             target_file_to_confirm = candidate
             confirm_msg = self.T("confirm_target_desc_win").format(target_file_to_confirm)
 
-        if not wait_for_main_app_exit(target_file_to_confirm):
-            self.status_icon_lbl.setText("❌")
-            err_box = QMessageBox(self)
-            if sys.platform != "darwin":
-                err_box.setWindowIcon(self.get_app_icon())
-            err_box.setIcon(QMessageBox.Icon.Warning)
-            err_box.setWindowTitle(self.T("err_app_running_title"))
-            err_box.setText(self.T("err_app_running_desc"))
-            err_box.exec()
-            return
+        if is_tricoredownloader_running(target_file_to_confirm):
+            if not wait_for_main_app_exit(target_file_to_confirm, timeout=1.5):
+                force_box = QMessageBox(self)
+                if sys.platform != "darwin":
+                    force_box.setWindowIcon(self.get_app_icon())
+                force_box.setIcon(QMessageBox.Icon.Question)
+                force_box.setWindowTitle(self.T("force_close_title"))
+                force_box.setText(self.T("force_close_desc"))
+                btn_yes = force_box.addButton(QMessageBox.StandardButton.Yes)
+                btn_no = force_box.addButton(QMessageBox.StandardButton.No)
+                force_box.setDefaultButton(btn_yes)
+                force_box.exec()
+
+                if force_box.clickedButton() == btn_yes:
+                    kill_tricoredownloader_processes(target_file_to_confirm)
+                    time.sleep(0.5)
+                    if is_tricoredownloader_running(target_file_to_confirm):
+                        self.status_icon_lbl.setText("❌")
+                        err_box = QMessageBox(self)
+                        if sys.platform != "darwin":
+                            err_box.setWindowIcon(self.get_app_icon())
+                        err_box.setIcon(QMessageBox.Icon.Warning)
+                        err_box.setWindowTitle(self.T("err_app_running_title"))
+                        err_box.setText(self.T("err_app_running_desc"))
+                        err_box.exec()
+                        return
+                else:
+                    return
 
         if target_file_to_confirm and confirm_msg:
             confirm_box = QMessageBox(self)
