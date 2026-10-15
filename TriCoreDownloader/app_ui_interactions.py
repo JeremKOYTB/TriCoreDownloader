@@ -175,7 +175,7 @@ class UiInteractionsMixin:
                     launch_updater()
         except Exception as e:
             if hasattr(self, "console_write"):
-                self.console_write(f"[ERROR] Impossible de lancer l'updater : {e}\n")
+                self.console_write(f"[ERROR] Unable to launch the updater : {e}\n")
 
     def on_unlimited_console_toggled(self, checked):
         if getattr(self, "_is_loading_ui", False):
