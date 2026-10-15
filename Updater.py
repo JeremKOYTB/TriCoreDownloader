@@ -19,8 +19,32 @@ import stat
 import platform
 import errno
 import tempfile
+import traceback
 
 ssl._create_default_https_context = ssl._create_unverified_context
+
+
+def _tlog(msg, level="INFO"):
+    try:
+        stream = sys.stderr if level in ("ERROR", "WARN") else sys.stdout
+        if stream is not None:
+            ts = time.strftime("%H:%M:%S")
+            stream.write(f"[{ts}] [TCD-Updater/{level}] {msg}\n")
+            stream.flush()
+    except Exception:
+        pass
+
+
+def _install_excepthook():
+    def _hook(exc_type, exc_value, exc_tb):
+        if issubclass(exc_type, KeyboardInterrupt):
+            return
+        tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        _tlog(f"Unhandled exception:\n{tb_str.rstrip()}", "ERROR")
+    sys.excepthook = _hook
+
+
+_install_excepthook()
 
 if "--install-dir" in sys.argv:
     try:
@@ -59,26 +83,309 @@ def _resolve_venv_environment():
                     sys.path.insert(0, sp_win)
                 lib_dir = os.path.join(v_path, "lib")
                 if os.path.isdir(lib_dir):
-                    for py_ver in os.listdir(lib_dir):
-                        sp_unix = os.path.join(lib_dir, py_ver, "site-packages")
-                        if os.path.isdir(sp_unix) and sp_unix not in sys.path:
-                            sys.path.insert(0, sp_unix)
+                    try:
+                        for py_ver in os.listdir(lib_dir):
+                            sp_unix = os.path.join(lib_dir, py_ver, "site-packages")
+                            if os.path.isdir(sp_unix) and sp_unix not in sys.path:
+                                sys.path.insert(0, sp_unix)
+                    except OSError:
+                        pass
 
 
 _resolve_venv_environment()
 
+RE_MARKDOWN_NL = re.compile(r'(?<!\n)\n(?!\n)')
+RE_APP_VERSION = re.compile(r'APP_VERSION\s*=\s*["\']([^"\']+)["\']')
+RE_SHA256_LINE = re.compile(r'([a-fA-F0-9]{64})\s+\*?([^\s\r\n]+)')
 
-def urlopen_safe(req, timeout=10):
+
+def get_mac_app_bundle_path(path):
+    abs_path = os.path.abspath(path)
+    parts = abs_path.split(os.sep)
+    for i, part in enumerate(parts):
+        if part.endswith(".app"):
+            return os.sep.join(parts[:i + 1])
+    return abs_path
+
+
+def get_app_dir():
+    try:
+        from TriCoreDownloader.config import APPDATA_DIR
+        return str(APPDATA_DIR)
+    except Exception:
+        pass
+
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA")
+        if not base:
+            user_prof = os.environ.get("USERPROFILE", os.path.expanduser("~"))
+            base = os.path.join(user_prof, "AppData", "Roaming")
+        return os.path.join(base, "TriCoreDownloader")
+    elif sys.platform == "darwin":
+        legacy_mac = os.path.expanduser("~/.config/TriCoreDownloader")
+        std_mac = os.path.expanduser("~/Library/Application Support/TriCoreDownloader")
+        if os.path.exists(legacy_mac) and not os.path.exists(std_mac):
+            return legacy_mac
+        return std_mac
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
+        return os.path.join(base, "TriCoreDownloader")
+
+
+def _files_quickly_match(src, dst):
+    try:
+        if not os.path.isfile(src) or not os.path.isfile(dst):
+            return False
+        st_src = os.stat(src)
+        st_dst = os.stat(dst)
+        if st_src.st_size != st_dst.st_size or st_src.st_size == 0:
+            return False
+        if int(st_src.st_mtime) == int(st_dst.st_mtime):
+            return True
+        with open(src, "rb") as f1, open(dst, "rb") as f2:
+            if f1.read(65536) != f2.read(65536):
+                return False
+            if st_src.st_size > 131072:
+                f1.seek(-65536, os.SEEK_END)
+                f2.seek(-65536, os.SEEK_END)
+                if f1.read(65536) != f2.read(65536):
+                    return False
+        return True
+    except Exception:
+        return False
+
+
+def _has_valid_std_stream():
+    try:
+        return (sys.stdout is not None and hasattr(sys.stdout, "fileno") and sys.stdout.fileno() >= 0)
+    except Exception:
+        return False
+
+
+def _relocate_and_relaunch_if_needed():
+    is_frozen = getattr(sys, "frozen", False)
+    appdata_dir = get_app_dir()
+
+    try:
+        old_log = os.path.join(appdata_dir, "updater_debug.log")
+        if os.path.isfile(old_log):
+            os.remove(old_log)
+    except Exception:
+        pass
+
+    already_relocated_flag = (
+        "--relocated" in sys.argv
+        or os.environ.get("TCD_UPDATER_RELOCATED") == "1"
+    )
+
+    if is_frozen:
+        if sys.platform == "darwin":
+            mac_app = get_mac_app_bundle_path(sys.executable)
+            if mac_app.endswith(".app"):
+                src_target = mac_app
+                temp_updater_app = os.path.join(appdata_dir, "TempUpdater.app")
+                temp_updater = os.path.join(temp_updater_app, "Contents", "MacOS", os.path.basename(sys.executable))
+                is_relocated = already_relocated_flag or (
+                    os.path.normcase(mac_app) == os.path.normcase(temp_updater_app)
+                )
+            else:
+                src_target = os.path.abspath(sys.executable)
+                temp_updater_app = None
+                temp_updater = os.path.join(appdata_dir, "TempUpdater")
+                is_relocated = already_relocated_flag or (
+                    os.path.normcase(src_target) == os.path.normcase(temp_updater)
+                )
+        else:
+            temp_updater_app = None
+            exe_ext = ".exe" if sys.platform == "win32" else ""
+            temp_updater = os.path.join(appdata_dir, f"TempUpdater{exe_ext}")
+
+            current_appimage = os.environ.get("APPIMAGE", "")
+            orig_appimage = os.environ.get("ORIGINAL_APPIMAGE", "")
+            argv0_abs = os.path.abspath(sys.argv[0]) if sys.argv else ""
+            exe_abs = os.path.abspath(sys.executable)
+
+            is_relocated = (
+                already_relocated_flag
+                or (current_appimage and os.path.normcase(os.path.abspath(current_appimage)) == os.path.normcase(temp_updater))
+                or (os.path.normcase(exe_abs) == os.path.normcase(temp_updater))
+                or (argv0_abs and os.path.normcase(argv0_abs) == os.path.normcase(temp_updater))
+                or "tempupdater" in os.path.basename(current_appimage).lower()
+                or "tempupdater" in os.path.basename(exe_abs).lower()
+                or "tempupdater" in os.path.basename(argv0_abs).lower()
+            )
+
+            if orig_appimage and os.path.exists(orig_appimage) and "tempupdater" not in os.path.basename(orig_appimage).lower():
+                src_target = os.path.abspath(orig_appimage)
+            elif current_appimage and os.path.exists(current_appimage) and "tempupdater" not in os.path.basename(current_appimage).lower():
+                src_target = os.path.abspath(current_appimage)
+            else:
+                src_target = exe_abs
+    else:
+        temp_updater_app = None
+        current_script = os.path.abspath(__file__)
+        temp_updater = os.path.join(appdata_dir, "TempUpdater.py")
+        is_relocated = (
+            already_relocated_flag
+            or os.path.normcase(current_script) == os.path.normcase(temp_updater)
+            or "tempupdater" in os.path.basename(current_script).lower()
+        )
+        src_target = current_script
+
+    if is_relocated:
+        _tlog(f"Running in relocated mode (PID={os.getpid()}, target={temp_updater})")
+        return
+
+    _tlog(f"Preparing standalone updater relocation from '{src_target}' to '{temp_updater}'...")
+    try:
+        os.makedirs(appdata_dir, exist_ok=True)
+
+        if sys.platform == "darwin" and is_frozen and src_target.endswith(".app"):
+            if os.path.exists(temp_updater_app):
+                shutil.rmtree(temp_updater_app, ignore_errors=True)
+            subprocess.run(["ditto", src_target, temp_updater_app], check=True)
+        else:
+            if not _files_quickly_match(src_target, temp_updater):
+                tmp_temp_updater = f"{temp_updater}.{os.getpid()}.tmp"
+                shutil.copy2(src_target, tmp_temp_updater)
+                if sys.platform != "win32":
+                    try:
+                        st = os.stat(tmp_temp_updater)
+                        os.chmod(tmp_temp_updater, st.st_mode | stat.S_IEXEC | 0o755)
+                    except Exception:
+                        pass
+                os.replace(tmp_temp_updater, temp_updater)
+            elif sys.platform != "win32":
+                try:
+                    st = os.stat(temp_updater)
+                    if not (st.st_mode & stat.S_IEXEC):
+                        os.chmod(temp_updater, st.st_mode | stat.S_IEXEC | 0o755)
+                except Exception:
+                    pass
+
+        passed_args = [a for a in sys.argv[1:] if a not in ("--updater", "--relocated")]
+
+        if is_frozen:
+            args = [temp_updater, "--updater", "--relocated"]
+        else:
+            args = [sys.executable, temp_updater, "--relocated"]
+
+        if "--install-dir" not in passed_args:
+            inst_dir = src_target if (sys.platform == "darwin" and is_frozen and src_target.endswith(".app")) else os.path.dirname(src_target)
+            args.extend(["--install-dir", inst_dir])
+
+        if "--original-target" not in passed_args:
+            if not is_frozen:
+                main_candidate = os.path.join(os.path.dirname(src_target), "run_TriCoreDownloader.py")
+                original_entry = main_candidate if os.path.exists(main_candidate) else src_target
+            else:
+                original_entry = src_target
+            args.extend(["--original-target", original_entry])
+
+        args.extend(passed_args)
+
+        clean_env = os.environ.copy()
+        for var in (
+            "_MEIPASS", "_MEIPASS2", "APPDIR", "APPIMAGE", "OWD", "ARGV0",
+            "LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONHOME", "PYTHONPATH",
+            "QT_PLUGIN_PATH", "QML2_IMPORT_PATH"
+        ):
+            clean_env.pop(var, None)
+
+        clean_env["TCD_UPDATER_RELOCATED"] = "1"
+        if is_frozen and sys.platform.startswith("linux") and "tempupdater" not in os.path.basename(src_target).lower():
+            clean_env["ORIGINAL_APPIMAGE"] = src_target
+
+        has_tty = _has_valid_std_stream()
+        kwargs = {
+            "stdin": subprocess.DEVNULL,
+            "env": clean_env,
+            "cwd": os.path.expanduser("~"),
+        }
+        if not has_tty:
+            kwargs["stdout"] = subprocess.DEVNULL
+            kwargs["stderr"] = subprocess.DEVNULL
+
+        if sys.platform == "win32":
+            if not has_tty:
+                kwargs["creationflags"] = 0x00000008 | 0x00000200
+            elif hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+                kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            kwargs["start_new_session"] = True
+            kwargs["close_fds"] = True
+
+        _tlog(f"Launching relocated updater process: {' '.join(args)}")
+        proc = subprocess.Popen(args, **kwargs)
+
+        alive = False
+        for _ in range(6):
+            time.sleep(0.04)
+            if proc.poll() is not None:
+                break
+        else:
+            alive = True
+
+        if not alive and is_frozen and sys.platform.startswith("linux"):
+            _tlog(f"Relocated AppImage exited early (code={proc.returncode}), retrying with APPIMAGE_EXTRACT_AND_RUN=1...", "WARN")
+            clean_env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
+            kwargs["env"] = clean_env
+            proc = subprocess.Popen(args, **kwargs)
+            for _ in range(8):
+                time.sleep(0.05)
+                if proc.poll() is not None:
+                    break
+            else:
+                alive = True
+
+        if alive:
+            _tlog(f"Relocated process active (PID={proc.pid}). Handing over control.")
+            os._exit(0)
+        else:
+            _tlog(f"Relocated process exited prematurely (code={proc.returncode}). Continuing in current process.", "WARN")
+    except Exception as e:
+        _tlog(f"Relocation skipped due to error ({e}). Continuing in current process.", "WARN")
+
+
+if __name__ == "__main__" or "--updater" in sys.argv:
+    _relocate_and_relaunch_if_needed()
+
+
+_SSL_CTX_CACHE = None
+
+
+def _get_verified_ssl_context():
+    global _SSL_CTX_CACHE
+    if _SSL_CTX_CACHE is not None:
+        return _SSL_CTX_CACHE
     try:
         import certifi
-        ctx = ssl.create_default_context(cafile=certifi.where())
-        return urllib.request.urlopen(req, timeout=timeout, context=ctx)
+        _SSL_CTX_CACHE = ssl.create_default_context(cafile=certifi.where())
+        return _SSL_CTX_CACHE
     except Exception:
         pass
     try:
-        ctx = ssl.create_default_context()
-        return urllib.request.urlopen(req, timeout=timeout, context=ctx)
+        _SSL_CTX_CACHE = ssl.create_default_context()
+        return _SSL_CTX_CACHE
     except Exception:
+        _SSL_CTX_CACHE = ssl._create_unverified_context()
+        return _SSL_CTX_CACHE
+
+
+def urlopen_safe(req, timeout=10):
+    ctx = _get_verified_ssl_context()
+    try:
+        return urllib.request.urlopen(req, timeout=timeout, context=ctx)
+    except urllib.error.HTTPError:
+        raise
+    except urllib.error.URLError as e:
+        if isinstance(getattr(e, "reason", None), ssl.SSLError):
+            _tlog(f"SSL verification failed ({e.reason}), falling back to unverified SSL context.", "WARN")
+            unverified_ctx = ssl._create_unverified_context()
+            return urllib.request.urlopen(req, timeout=timeout, context=unverified_ctx)
+        raise
+    except ssl.SSLError as e:
+        _tlog(f"Direct SSL error ({e}), falling back to unverified SSL context.", "WARN")
         unverified_ctx = ssl._create_unverified_context()
         return urllib.request.urlopen(req, timeout=timeout, context=unverified_ctx)
 
@@ -97,9 +404,10 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import QIcon, QPixmap, QTextOption, QAction
 
-RE_MARKDOWN_NL = re.compile(r'(?<!\n)\n(?!\n)')
-RE_APP_VERSION = re.compile(r'APP_VERSION\s*=\s*["\']([^"\']+)["\']')
-RE_SHA256_LINE = re.compile(r'([a-fA-F0-9]{64})\s+\*?([^\s\r\n]+)')
+try:
+    import darkdetect
+except ImportError:
+    darkdetect = None
 
 
 def _compute_file_sha256(file_path):
@@ -138,15 +446,6 @@ def _force_rm_readonly(action, name, exc):
             os.remove(name)
     except Exception:
         pass
-
-
-def get_mac_app_bundle_path(path):
-    abs_path = os.path.abspath(path)
-    parts = abs_path.split(os.sep)
-    for i, part in enumerate(parts):
-        if part.endswith(".app"):
-            return os.sep.join(parts[:i + 1])
-    return abs_path
 
 
 def resolve_mac_target_app(original_target=None, install_dir=None):
@@ -199,9 +498,15 @@ def detect_system_language():
             sys_lang_raw = locale.windows_locale.get(lang_id, "")
             return "FR" if sys_lang_raw.lower().startswith("fr") else "EN"
         else:
-            sys_lang_raw, _ = locale.getlocale()
+            sys_lang_raw = (
+                os.environ.get("LC_ALL")
+                or os.environ.get("LC_MESSAGES")
+                or os.environ.get("LANG")
+                or ""
+            )
             if not sys_lang_raw or sys_lang_raw == "C":
-                sys_lang_raw = os.environ.get("LC_ALL") or os.environ.get("LANG", "")
+                loc_val, _ = locale.getlocale()
+                sys_lang_raw = loc_val or ""
             return "FR" if sys_lang_raw.lower().startswith("fr") else "EN"
     except Exception:
         return "EN"
@@ -240,32 +545,24 @@ def _is_macos_apple_silicon() -> bool:
             except Exception:
                 pass
 
-        try:
-            res = subprocess.run(
-                ["uname", "-m"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
-                timeout=1,
-            )
-            if _is_arm64_arch_string(res.stdout):
-                return True
-        except Exception:
-            pass
-
     return False
 
 
 def is_tricoredownloader_running(target_file=None):
     current_pid = os.getpid()
+    parent_pid = os.getppid() if hasattr(os, "getppid") else -1
+    ignored_pids = {current_pid, parent_pid}
 
     if sys.platform == "win32":
         if target_file and os.path.exists(target_file) and target_file.lower().endswith(".exe"):
             try:
                 with open(target_file, "r+b"):
                     pass
-            except (PermissionError, OSError):
+            except PermissionError:
                 return True
+            except OSError as e:
+                if e.errno in (errno.EACCES, errno.EPERM):
+                    return True
 
         try:
             out = subprocess.check_output(
@@ -283,7 +580,7 @@ def is_tricoredownloader_running(target_file=None):
                         proc_pid = int(parts[1])
                     except ValueError:
                         continue
-                    if proc_pid == current_pid:
+                    if proc_pid in ignored_pids:
                         continue
                     if "tricoredownloader" in proc_name and "updater" not in proc_name:
                         return True
@@ -297,11 +594,34 @@ def is_tricoredownloader_running(target_file=None):
                 with open(target_file, "r+b"):
                     pass
             except OSError as e:
-                if e.errno in (errno.ETXTBSY, errno.EACCES, errno.EPERM):
+                if e.errno == errno.ETXTBSY:
                     return True
 
+        if os.path.isdir("/proc"):
+            try:
+                for entry in os.listdir("/proc"):
+                    if not entry.isdigit():
+                        continue
+                    pid = int(entry)
+                    if pid in ignored_pids:
+                        continue
+                    try:
+                        with open(f"/proc/{pid}/cmdline", "rb") as f:
+                            raw_cmd = f.read().replace(b"\x00", b" ").decode("utf-8", errors="ignore").strip().lower()
+                    except Exception:
+                        continue
+                    if not raw_cmd:
+                        continue
+                    if "tempupdater" in raw_cmd or "updater.py" in raw_cmd or "--updater" in raw_cmd or "--relocated" in raw_cmd:
+                        continue
+                    if "run_tricoredownloader.py" in raw_cmd or ("tricoredownloader" in raw_cmd and "updater" not in raw_cmd):
+                        return True
+                return False
+            except Exception:
+                pass
+
         try:
-            out = subprocess.check_output(["ps", "-ax", "-o", "pid=,command="], text=True, timeout=2, stderr=subprocess.DEVNULL)
+            out = subprocess.check_output(["ps", "-eo", "pid=,args="], text=True, timeout=2, stderr=subprocess.DEVNULL)
             for line in out.splitlines():
                 parts = line.strip().split(None, 1)
                 if len(parts) < 2:
@@ -310,10 +630,10 @@ def is_tricoredownloader_running(target_file=None):
                     pid = int(parts[0])
                 except ValueError:
                     continue
-                if pid == current_pid:
+                if pid in ignored_pids:
                     continue
                 cmd = parts[1].lower()
-                if "tempupdater" in cmd or "updater.py" in cmd or "--updater" in cmd:
+                if "tempupdater" in cmd or "updater.py" in cmd or "--updater" in cmd or "--relocated" in cmd:
                     continue
                 if "run_tricoredownloader.py" in cmd or ("tricoredownloader" in cmd and "updater" not in cmd):
                     return True
@@ -333,10 +653,10 @@ def is_tricoredownloader_running(target_file=None):
                     pid = int(parts[0])
                 except ValueError:
                     continue
-                if pid == current_pid:
+                if pid in ignored_pids:
                     continue
                 cmd = parts[1].lower()
-                if "tempupdater" in cmd or "updater.py" in cmd or "--updater" in cmd:
+                if "tempupdater" in cmd or "updater.py" in cmd or "--updater" in cmd or "--relocated" in cmd:
                     continue
                 if target_norm and target_norm in cmd:
                     return True
@@ -349,33 +669,20 @@ def is_tricoredownloader_running(target_file=None):
     return False
 
 
-def wait_for_main_app_exit(target_file=None, timeout=3.0):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+def wait_for_main_app_exit(target_file=None, timeout=3.5):
+    if not is_tricoredownloader_running(target_file):
+        return True
+    _tlog("Waiting for main TriCoreDownloader instance to close...")
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         if not is_tricoredownloader_running(target_file):
+            _tlog("Main TriCoreDownloader instance is now closed.")
             return True
-        time.sleep(0.25)
-    return not is_tricoredownloader_running(target_file)
-
-
-def ensure_dependencies():
-    if getattr(sys, "frozen", False):
-        return
-    if importlib.util.find_spec("darkdetect") is None:
-        try:
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "darkdetect", "--no-warn-script-location"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-        except Exception:
-            pass
-
-
-ensure_dependencies()
-try:
-    import darkdetect
-except ImportError:
-    darkdetect = None
+        time.sleep(0.15)
+    still_running = is_tricoredownloader_running(target_file)
+    if still_running:
+        _tlog("Main TriCoreDownloader instance is still running after timeout!", "WARN")
+    return not still_running
 
 
 def _resolve_app_version():
@@ -454,7 +761,7 @@ THEMES = {
 LOCALES = {
     "FR": {
         "window_title": "TriCoreDownloader Updater",
-        "card_title": "TriCoreDownloader Updater 2.0.0",
+        "card_title": "TriCoreDownloader Updater 2.0.1",
         "current_version": "Version actuelle de votre TriCoreDownloader : {}",
         "env_badge_format": "{os} ({arch}) • {mode}",
         "env_mode_compiled": "Version compilée",
@@ -539,7 +846,7 @@ LOCALES = {
     },
     "EN": {
         "window_title": "TriCoreDownloader Updater",
-        "card_title": "TriCoreDownloader Updater 2.0.0",
+        "card_title": "TriCoreDownloader Updater 2.0.1",
         "current_version": "Current version of your TriCoreDownloader: {}",
         "env_badge_format": "{os} ({arch}) • {mode}",
         "env_mode_compiled": "Compiled build",
@@ -720,32 +1027,9 @@ def check_directory_permissions(target_dir):
         if os.path.exists(probe_file):
             os.remove(probe_file)
         return True
-    except Exception:
+    except Exception as e:
+        _tlog(f"Directory permission check failed for '{target_dir}': {e}", "WARN")
         return False
-
-
-def get_app_dir():
-    try:
-        from TriCoreDownloader.config import APPDATA_DIR
-        return str(APPDATA_DIR)
-    except Exception:
-        pass
-
-    if sys.platform == "win32":
-        base = os.environ.get("APPDATA")
-        if not base:
-            user_prof = os.environ.get("USERPROFILE", os.path.expanduser("~"))
-            base = os.path.join(user_prof, "AppData", "Roaming")
-        return os.path.join(base, "TriCoreDownloader")
-    elif sys.platform == "darwin":
-        legacy_mac = os.path.expanduser("~/.config/TriCoreDownloader")
-        std_mac = os.path.expanduser("~/Library/Application Support/TriCoreDownloader")
-        if os.path.exists(legacy_mac) and not os.path.exists(std_mac):
-            return legacy_mac
-        return std_mac
-    else:
-        base = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
-        return os.path.join(base, "TriCoreDownloader")
 
 
 def load_tricore_config():
@@ -765,8 +1049,8 @@ def load_tricore_config():
                 for k in cfg:
                     if k in data:
                         cfg[k] = data[k]
-        except Exception:
-            pass
+        except Exception as e:
+            _tlog(f"Failed to read config.json: {e}", "WARN")
 
     raw_color = str(cfg.get("accent_color", "")).strip().lower()
     default_colors = ["#c6a1fa", "#bc181a", "#4ebcff", "#7e57c2", "#c4a1ff", "#e60012", "#009ac7", "auto", ""]
@@ -1221,6 +1505,7 @@ class ReleasesFetchThread(QThread):
 
     def _fetch_releases_fallback_html(self):
         try:
+            _tlog("Attempting GitHub Web fallback for latest release...")
             req = urllib.request.Request(
                 "https://github.com/JeremKOYTB/TriCoreDownloader/releases/latest",
                 headers={'User-Agent': 'TriCoreDownloader-Updater'}
@@ -1242,24 +1527,28 @@ class ReleasesFetchThread(QThread):
                     {"name": n, "browser_download_url": f"{base_dl}/{n}"}
                     for n in asset_names
                 ]
+                _tlog(f"Fallback resolved latest tag: {tag}")
                 return [{
                     "tag_name": tag,
                     "prerelease": False,
                     "body": f"Release {tag} (GitHub Web Fallback)",
                     "assets": assets,
                 }]
-        except Exception:
-            pass
+        except Exception as e:
+            _tlog(f"GitHub Web fallback failed: {e}", "WARN")
         return []
 
     def run(self):
         url = f"https://api.github.com/repos/JeremKOYTB/TriCoreDownloader/releases?t={int(time.time())}"
+        _tlog("Fetching available releases from GitHub API...")
         try:
             req = urllib.request.Request(url, headers={'User-Agent': 'TriCoreDownloader-Updater'})
             with urlopen_safe(req, timeout=10) as response:
                 data = json.loads(response.read().decode('utf-8'))
+            _tlog(f"Fetched {len(data) if isinstance(data, list) else 0} releases from GitHub API.")
             self.finished.emit(data, "")
         except urllib.error.HTTPError as e:
+            _tlog(f"GitHub API HTTP error: {e.code}", "WARN")
             if e.code == 403:
                 fallback = self._fetch_releases_fallback_html()
                 if fallback:
@@ -1269,6 +1558,7 @@ class ReleasesFetchThread(QThread):
             else:
                 self.finished.emit([], str(e))
         except Exception as e:
+            _tlog(f"Failed to fetch releases: {e}", "ERROR")
             self.finished.emit([], str(e))
 
 
@@ -1312,6 +1602,7 @@ class DownloadWorkerThread(QThread):
         return LOCALES.get(self.lang, LOCALES["EN"]).get(key, key)
 
     def _purge_caches(self, root_dir=None):
+        _tlog("Cleaning temporary files and caches...")
         self.progress.emit(self.T("cleaning_cache"))
         target_root = os.path.abspath(root_dir or self.install_dir)
 
@@ -1383,7 +1674,7 @@ class DownloadWorkerThread(QThread):
                 os.replace(tmp_dst, dst)
                 replaced = True
                 break
-            except PermissionError:
+            except (PermissionError, OSError):
                 if attempt >= 4 and os.path.exists(dst):
                     try:
                         if os.path.exists(old_backup):
@@ -1394,7 +1685,7 @@ class DownloadWorkerThread(QThread):
                         break
                     except Exception:
                         pass
-                time.sleep(0.4)
+                time.sleep(0.35)
 
         if not replaced:
             os.replace(tmp_dst, dst)
@@ -1426,6 +1717,7 @@ class DownloadWorkerThread(QThread):
         return None
 
     def _replace_mac_app_bundle(self, src_app, dst_app):
+        _tlog(f"Replacing macOS application bundle: {dst_app}")
         self.progress.emit(self.T("replacing_binary"))
         src_inner_exe = self._find_mac_bundle_executable(src_app)
         if not src_inner_exe:
@@ -1484,6 +1776,7 @@ class DownloadWorkerThread(QThread):
     def _extract_dmg(self, dmg_file_path):
         mount_point = os.path.join(get_app_dir(), f"TCD_Mount_{os.getpid()}")
         os.makedirs(mount_point, exist_ok=True)
+        _tlog(f"Mounting DMG '{dmg_file_path}' at '{mount_point}'...")
         self.progress.emit(self.T("mounting_dmg"))
 
         attach_cmd = [
@@ -1540,6 +1833,7 @@ class DownloadWorkerThread(QThread):
         return None
 
     def run(self):
+        _tlog(f"Starting installation worker for version '{self.target_version}' (asset='{self.asset_name}', profile='{self.env_profile}')")
         if (sys.platform == "darwin" or self.env_profile in ("macos_arm64", "macos_x64")) and self.is_frozen and (self.is_dmg or self.custom_dst_file):
             target_mac_app = self.custom_dst_file if (self.custom_dst_file and self.custom_dst_file.endswith(".app")) else resolve_mac_target_app(install_dir=self.install_dir)
             check_dir = os.path.dirname(target_mac_app)
@@ -1548,22 +1842,26 @@ class DownloadWorkerThread(QThread):
         else:
             check_dir = os.path.dirname(self.install_dir) if self.install_dir.endswith(".app") else self.install_dir
 
+        _tlog(f"Checking write permissions on directory: {check_dir}")
         if not check_directory_permissions(check_dir):
+            _tlog(f"Permission denied on target directory: {check_dir}", "ERROR")
             self.completed.emit(False, self.T("err_permission_denied").format(check_dir))
             return
 
         if not wait_for_main_app_exit(self.custom_dst_file):
+            _tlog("Aborting update because TriCoreDownloader is still running.", "ERROR")
             self.completed.emit(False, self.T("err_app_running_desc"))
             return
 
-        temp_download_path = os.path.join(get_app_dir(), "TCD_Download_Temp.bin")
-        temp_extract_dir = os.path.join(get_app_dir(), "TCD_Extract_Temp")
+        temp_download_path = os.path.join(get_app_dir(), f"TCD_Download_Temp_{os.getpid()}.bin")
+        temp_extract_dir = os.path.join(get_app_dir(), f"TCD_Extract_Temp_{os.getpid()}")
 
         try:
             if not self.is_direct_binary and not self.is_dmg and self.is_7z:
                 self.progress.emit(self.T("loading_7z"))
                 if importlib.util.find_spec("py7zr") is None:
                     if not getattr(sys, "frozen", False):
+                        _tlog("Installing py7zr dependency for .7z archive extraction...")
                         try:
                             subprocess.check_call(
                                 [sys.executable, "-m", "pip", "install", "py7zr", "--no-warn-script-location"],
@@ -1574,6 +1872,7 @@ class DownloadWorkerThread(QThread):
                     else:
                         raise Exception("Extraction format 7z requires 'py7zr'.")
 
+            _tlog(f"Downloading package from: {self.download_url}")
             self.progress.emit(self.T("downloading_update"))
             self.progress_val.emit(0)
             req = urllib.request.Request(self.download_url, headers={'User-Agent': 'TriCoreDownloader-Updater'})
@@ -1586,6 +1885,7 @@ class DownloadWorkerThread(QThread):
                 downloaded = 0
                 chunk_size = 131072
                 last_pct = -1
+                last_logged_step = -1
                 with open(temp_download_path, 'wb') as out_file:
                     while True:
                         chunk = response.read(chunk_size)
@@ -1608,16 +1908,25 @@ class DownloadWorkerThread(QThread):
                                         pct=pct, dl=dl_mb, tot=tot_mb, spd=spd_mb
                                     )
                                 )
+                                step_bucket = pct // 20
+                                if step_bucket > last_logged_step:
+                                    last_logged_step = step_bucket
+                                    _tlog(f"Download progress: {pct}% ({dl_mb:.1f}/{tot_mb:.1f} MB at {spd_mb:.1f} MB/s)")
 
             if total_size > 0 and os.path.getsize(temp_download_path) != total_size:
                 raise RuntimeError(self.T("err_verify_failed").format("Download incomplete"))
 
+            computed_dl_hash = dl_hasher.hexdigest().lower()
+            _tlog(f"Download complete ({os.path.getsize(temp_download_path)} bytes). Computed SHA-256: {computed_dl_hash}")
+
             if self.expected_sha256:
-                computed_dl_hash = dl_hasher.hexdigest().lower()
+                _tlog(f"Verifying against official release SHA-256: {self.expected_sha256}")
                 if computed_dl_hash != self.expected_sha256:
+                    _tlog("SHA-256 mismatch detected!", "ERROR")
                     raise RuntimeError(
                         self.T("err_sha256_mismatch").format(self.asset_name or "update package")
                     )
+                _tlog("SHA-256 integrity verified successfully.")
 
             self.progress_val.emit(100)
 
@@ -1626,6 +1935,7 @@ class DownloadWorkerThread(QThread):
 
             if self.is_frozen and self.is_dmg:
                 self._extract_dmg(temp_download_path)
+                _tlog("macOS DMG update completed and verified.")
                 self.completed.emit(True, self.T("update_success"))
                 return
 
@@ -1643,13 +1953,16 @@ class DownloadWorkerThread(QThread):
                     target_name = self.asset_name or "TriCoreDownloader"
                     dst_file = os.path.join(self.install_dir, target_name)
 
+                _tlog(f"Replacing target binary atomically: {dst_file}")
                 self._safe_replace(temp_download_path, dst_file, verify_hash=True)
                 self.progress.emit(self.T("verifying_install"))
                 self._purge_caches(os.path.dirname(dst_file))
                 self.installed_target_path = os.path.abspath(dst_file)
+                _tlog(f"Binary replacement and SHA-256 verification succeeded: {self.installed_target_path}")
                 self.completed.emit(True, self.T("update_success"))
                 return
 
+            _tlog("Extracting source archive...")
             self.progress.emit(self.T("extracting_files"))
             if os.path.exists(temp_extract_dir):
                 shutil.rmtree(temp_extract_dir, onerror=_force_rm_readonly)
@@ -1729,6 +2042,7 @@ class DownloadWorkerThread(QThread):
                     except Exception:
                         pass
 
+            _tlog(f"Installing {len(extracted_files)} source files into '{self.install_dir}'...")
             self.progress.emit(self.T("installing_new"))
             for root, dirs, files in os.walk(base_target):
                 dirs[:] = [d for d in dirs if d != "__MACOSX" and d != "__pycache__"]
@@ -1757,9 +2071,11 @@ class DownloadWorkerThread(QThread):
 
             self._purge_caches(self.install_dir)
             self.installed_target_path = os.path.abspath(os.path.join(self.install_dir, "run_TriCoreDownloader.py"))
+            _tlog(f"Source update completed and verified: {self.installed_target_path}")
             self.completed.emit(True, self.T("update_success"))
 
         except Exception as e:
+            _tlog(f"Installation worker error: {e}", "ERROR")
             self.completed.emit(False, str(e))
         finally:
             if os.path.exists(temp_extract_dir):
@@ -1828,11 +2144,11 @@ class UpdaterWindow(QMainWindow):
         if self.theme_name not in THEMES or self.theme_name == "auto":
             is_dark = True
             try:
-                if darkdetect is not None:
-                    is_dark = bool(darkdetect.isDark())
-                else:
-                    scheme = QApplication.styleHints().colorScheme()
+                scheme = QApplication.styleHints().colorScheme()
+                if scheme != Qt.ColorScheme.Unknown:
                     is_dark = (scheme == Qt.ColorScheme.Dark)
+                elif darkdetect is not None:
+                    is_dark = bool(darkdetect.isDark())
             except Exception:
                 pass
             self.theme_name = "dark" if is_dark else "light"
@@ -1852,6 +2168,7 @@ class UpdaterWindow(QMainWindow):
         self.worker = None
 
         self._detect_initial_environment()
+        _tlog(f"Environment detected: {self.get_environment_display_text()} | install_dir='{self.install_dir}' | original_target='{self.original_target}'")
         self.init_ui()
         self.apply_style()
 
@@ -2005,6 +2322,7 @@ class UpdaterWindow(QMainWindow):
             self.env_profile = "source"
             self.env_has_unknown = False
 
+        _tlog(f"Environment profile set to: {self.env_profile} ({self.get_environment_display_text()})")
         self.update_env_badge_ui()
 
     def get_environment_display_text(self):
@@ -2073,26 +2391,23 @@ class UpdaterWindow(QMainWindow):
         if hasattr(self, 'pulse_anim') and self.pulse_anim and self.pulse_anim.state() == QAbstractAnimation.State.Running:
             self.pulse_anim.stop()
 
-        for th_attr in ['commit_thread', 'fetch_thread', 'worker']:
+        all_threads = set(getattr(self, '_retained_threads', []))
+        for th_attr in ('commit_thread', 'fetch_thread', 'worker'):
             th = getattr(self, th_attr, None)
-            if th:
-                try:
-                    th.finished.disconnect()
-                except Exception:
-                    pass
-                if th.isRunning():
-                    th.quit()
-                    th.wait(250)
+            if th is not None:
+                all_threads.add(th)
 
-        for th in list(getattr(self, '_retained_threads', [])):
-            if th:
-                try:
-                    th.finished.disconnect()
-                except Exception:
-                    pass
-                if th.isRunning():
-                    th.quit()
-                    th.wait(250)
+        for th in all_threads:
+            try:
+                th.finished.disconnect()
+            except Exception:
+                pass
+            if th.isRunning():
+                th.requestInterruption()
+                th.quit()
+                th.wait(300)
+
+        self._retained_threads.clear()
 
     def init_ui(self):
         central_widget = QWidget(self)
@@ -2150,13 +2465,14 @@ class UpdaterWindow(QMainWindow):
         self.status_lbl = QLabel(self.T("checking_versions"), card_frame)
         self.status_lbl.setWordWrap(True)
         self.status_lbl.setOpenExternalLinks(True)
-        status_layout.addWidget(self.status_lbl)
+        self.status_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        status_layout.addWidget(self.status_lbl, 1)
 
         self.status_icon_lbl = QLabel("", card_frame)
-        self.status_icon_lbl.setFixedWidth(20)
+        self.status_icon_lbl.setFixedWidth(24)
+        self.status_icon_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         status_layout.addWidget(self.status_icon_lbl)
 
-        status_layout.addStretch()
         card_layout.addLayout(status_layout)
 
         self.progress_bar = QProgressBar(card_frame)
@@ -2346,6 +2662,7 @@ class UpdaterWindow(QMainWindow):
             self.lbl_warning_symbol.setText("")
 
     def refresh_data(self):
+        _tlog("Manual release refresh requested.")
         if hasattr(self, 'btn_refresh'):
             self.btn_refresh.setEnabled(False)
         self.status_icon_lbl.setText("")
@@ -2459,6 +2776,7 @@ class UpdaterWindow(QMainWindow):
 
     def fetch_beta_source(self):
         url = f"https://raw.githubusercontent.com/JeremKOYTB/TriCoreDownloader/refs/heads/main/TriCoreDownloader/config.py?t={int(time.time())}"
+        _tlog("Fetching main branch version metadata...")
         try:
             req = urllib.request.Request(url, headers={'User-Agent': 'TriCoreDownloader-Updater'})
             with urlopen_safe(req, timeout=5) as response:
@@ -2485,6 +2803,7 @@ class UpdaterWindow(QMainWindow):
             self.version_combo.setCurrentIndex(0)
             self.on_version_changed_index(0)
         except Exception as e:
+            _tlog(f"Failed to fetch main branch metadata: {e}", "WARN")
             self.set_warning(self.T("err_fetch_main").format(e))
             self.btn_execute.setEnabled(False)
 
@@ -2653,8 +2972,10 @@ class UpdaterWindow(QMainWindow):
             confirm_box.setDefaultButton(btn_yes)
             confirm_box.exec()
             if confirm_box.clickedButton() != btn_yes:
+                _tlog("Target confirmation declined by user.")
                 return
             self.target_confirmed = target_file_to_confirm
+            _tlog(f"Target location confirmed by user: {self.target_confirmed}")
 
         if target_file_to_confirm:
             check_dir = os.path.dirname(target_file_to_confirm)
@@ -2822,6 +3143,7 @@ class UpdaterWindow(QMainWindow):
                             target = main_script
 
             if not target or not os.path.exists(target):
+                _tlog("Could not locate main TriCoreDownloader executable/script to relaunch.", "WARN")
                 return
 
             if sys.platform != "win32" and not target.endswith(".app"):
@@ -2838,8 +3160,8 @@ class UpdaterWindow(QMainWindow):
 
             for clean_var in (
                 "APPDIR", "APPIMAGE", "OWD", "ARGV0",
-                "_MEIPASS", "_MEIPASS2", "ORIGINAL_APPIMAGE",
-                "LD_LIBRARY_PATH", "PYTHONHOME", "QT_PLUGIN_PATH", "QML2_IMPORT_PATH"
+                "_MEIPASS", "_MEIPASS2", "ORIGINAL_APPIMAGE", "TCD_UPDATER_RELOCATED",
+                "LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONHOME", "QT_PLUGIN_PATH", "QML2_IMPORT_PATH"
             ):
                 env.pop(clean_var, None)
 
@@ -2850,6 +3172,7 @@ class UpdaterWindow(QMainWindow):
             else:
                 env.pop("PYTHONPATH", None)
 
+            _tlog(f"Relaunching TriCoreDownloader: {target}")
             if sys.platform == "darwin":
                 if target.endswith(".app"):
                     subprocess.Popen(["open", "-n", target], cwd=os.path.dirname(target), env=env)
@@ -2879,10 +3202,29 @@ class UpdaterWindow(QMainWindow):
                     py_exec = self._find_python_for_source_launch(exec_dir)
                     subprocess.Popen([py_exec, target], env=env, start_new_session=True, cwd=exec_dir, close_fds=True)
                 else:
-                    subprocess.Popen([target], env=env, start_new_session=True, cwd=exec_dir, close_fds=True)
+                    proc = subprocess.Popen([target], env=env, start_new_session=True, cwd=exec_dir, close_fds=True)
+                    if target.lower().endswith(".appimage"):
+                        time.sleep(0.15)
+                        if proc.poll() is not None and proc.returncode != 0:
+                            _tlog("AppImage launch failed (FUSE unavailable), relaunching with APPIMAGE_EXTRACT_AND_RUN=1...", "WARN")
+                            env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
+                            subprocess.Popen([target], env=env, start_new_session=True, cwd=exec_dir, close_fds=True)
 
-        except Exception:
-            pass
+        except Exception as e:
+            _tlog(f"Error while relaunching main app: {e}", "ERROR")
+
+    def _graceful_quit_app(self, relaunch_main=False):
+        if self._is_closing:
+            return
+        self._is_closing = True
+        _tlog("Shutting down updater cleanly...")
+        self.clean_up_resources()
+        if relaunch_main:
+            self.launch_main_app()
+        self.close()
+        app_inst = QApplication.instance()
+        if app_inst is not None:
+            app_inst.quit()
 
     def installation_finished(self, success, message):
         self.spinner_timer.stop()
@@ -2902,11 +3244,7 @@ class UpdaterWindow(QMainWindow):
             success_box.setText(self.T("success_desc"))
             success_box.exec()
 
-            self._is_closing = True
-            self.clean_up_resources()
-            self.launch_main_app()
-            self.close()
-            os._exit(0)
+            self._graceful_quit_app(relaunch_main=True)
         else:
             self.progress_bar.hide()
             self.status_icon_lbl.setText("❌")
@@ -2945,6 +3283,9 @@ class UpdaterWindow(QMainWindow):
         if self._is_closing or self._in_cancel_prompt:
             return
 
+        if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
+            return
+
         self._in_cancel_prompt = True
         try:
             box = QMessageBox(self)
@@ -2962,16 +3303,9 @@ class UpdaterWindow(QMainWindow):
 
             clicked = box.clickedButton()
             if clicked == btn_return:
-                self._is_closing = True
-                self.clean_up_resources()
-                self.launch_main_app()
-                self.close()
-                os._exit(0)
+                self._graceful_quit_app(relaunch_main=True)
             elif clicked == btn_exit:
-                self._is_closing = True
-                self.clean_up_resources()
-                self.close()
-                os._exit(0)
+                self._graceful_quit_app(relaunch_main=False)
             else:
                 self.status_icon_lbl.setText("❌")
                 self.status_lbl.setText(self.T("select_release"))
@@ -2991,6 +3325,7 @@ class MainBranchCommitFetchThread(QThread):
 
     def run(self):
         url = f"https://api.github.com/repos/JeremKOYTB/TriCoreDownloader/commits/main?t={int(time.time())}"
+        _tlog("Fetching latest commit information for main branch...")
         try:
             req = urllib.request.Request(url, headers={'User-Agent': 'TriCoreDownloader-Updater'})
             with urlopen_safe(req, timeout=5) as response:
@@ -3002,6 +3337,7 @@ class MainBranchCommitFetchThread(QThread):
             author_info = commit_info.get("author", {})
             date_str = author_info.get("date", "").replace("T", " ").replace("Z", "")
 
+            _tlog(f"Loaded latest main commit: {sha} ({date_str})")
             html_output = (
                 f"<div style='margin-bottom: 4px;'><b style='color: #C4A1FF;'>{self.T('latest_commit')}</b> <code style='background-color: #2D2D36; padding: 2px 4px; border-radius: 4px; color: #FFFFFF;'>{sha}</code></div>"
                 f"<div style='margin-bottom: 4px;'><b style='color: #8A8A95;'>{self.T('commit_date')}</b> <span style='color: #E8E8E8;'>{date_str}</span></div>"
@@ -3011,142 +3347,52 @@ class MainBranchCommitFetchThread(QThread):
             )
             self.finished.emit(html_output)
         except Exception as e:
+            _tlog(f"Failed to load main branch commit: {e}", "WARN")
             self.finished.emit(f"<div style='color: #EF5350;'>{self.T('err_commit_api').format(e)}</div>")
 
 
 def handle_interrupt(window_instance):
+    _tlog("Interrupt signal received in terminal.")
     window_instance.handle_cancel()
 
 
-if __name__ == "__main__":
-    is_frozen = getattr(sys, "frozen", False)
-    appdata_dir = get_app_dir()
+_UPDATER_STARTED = False
 
-    if is_frozen:
-        if sys.platform == "darwin":
-            mac_app = get_mac_app_bundle_path(sys.executable)
-            if mac_app.endswith(".app"):
-                src_target = mac_app
-                temp_updater_app = os.path.join(appdata_dir, "TempUpdater.app")
-                temp_updater = os.path.join(temp_updater_app, "Contents", "MacOS", os.path.basename(sys.executable))
-                is_relocated = (os.path.normcase(get_mac_app_bundle_path(sys.executable)) == os.path.normcase(temp_updater_app))
-            else:
-                src_target = os.path.abspath(sys.executable)
-                temp_updater = os.path.join(appdata_dir, "TempUpdater")
-                is_relocated = (os.path.normcase(src_target) == os.path.normcase(temp_updater))
-        else:
-            appimage_path = os.environ.get("ORIGINAL_APPIMAGE") or os.environ.get("APPIMAGE")
-            if appimage_path and os.path.exists(appimage_path) and "tempupdater" not in os.path.basename(appimage_path).lower():
-                src_target = os.path.abspath(appimage_path)
-            else:
-                src_target = os.path.abspath(sys.executable)
 
-            exe_ext = ".exe" if sys.platform == "win32" else ""
-            temp_updater = os.path.join(appdata_dir, f"TempUpdater{exe_ext}")
-            is_relocated = (os.path.normcase(src_target) == os.path.normcase(temp_updater))
-    else:
-        current_script = os.path.abspath(__file__)
-        temp_updater = os.path.join(appdata_dir, "TempUpdater.py")
-        is_relocated = (os.path.normcase(current_script) == os.path.normcase(temp_updater))
-        src_target = current_script
+def main():
+    global _UPDATER_STARTED
+    if _UPDATER_STARTED:
+        return
+    _UPDATER_STARTED = True
 
-    if not is_relocated:
-        relocated_successfully = False
-        debug_log = None
-        try:
-            os.makedirs(appdata_dir, exist_ok=True)
+    _relocate_and_relaunch_if_needed()
 
-            if sys.platform == "darwin" and is_frozen and src_target.endswith(".app"):
-                if os.path.exists(temp_updater_app):
-                    shutil.rmtree(temp_updater_app, ignore_errors=True)
-                subprocess.run(["ditto", src_target, temp_updater_app], check=True)
-            else:
-                tmp_temp_updater = temp_updater + ".tmp"
-                shutil.copy2(src_target, tmp_temp_updater)
-                if sys.platform != "win32":
-                    try:
-                        st = os.stat(tmp_temp_updater)
-                        os.chmod(tmp_temp_updater, st.st_mode | stat.S_IEXEC | 0o755)
-                    except Exception:
-                        pass
-                os.replace(tmp_temp_updater, temp_updater)
-
-            for _ in range(10):
-                if os.path.exists(temp_updater) and (os.path.isdir(temp_updater) if sys.platform == "darwin" and is_frozen and src_target.endswith(".app") else os.path.getsize(temp_updater) > 0):
-                    break
-                time.sleep(0.05)
-
-            if is_frozen:
-                args = [temp_updater, "--updater"]
-                passed_args = [a for a in sys.argv[1:] if a != "--updater"]
-            else:
-                args = [sys.executable, temp_updater]
-                passed_args = sys.argv[1:]
-
-            if "--install-dir" not in passed_args:
-                inst_dir = src_target if sys.platform == "darwin" and is_frozen and src_target.endswith(".app") else os.path.dirname(src_target)
-                args.extend(["--install-dir", inst_dir])
-
-            if "--original-target" not in passed_args:
-                if not is_frozen:
-                    main_candidate = os.path.join(os.path.dirname(src_target), "run_TriCoreDownloader.py")
-                    original_entry = main_candidate if os.path.exists(main_candidate) else src_target
-                else:
-                    original_entry = src_target
-                args.extend(["--original-target", original_entry])
-
-            args.extend(passed_args)
-
-            log_file_path = os.path.join(appdata_dir, "updater_debug.log")
-            debug_log = open(log_file_path, "w", encoding="utf-8")
-            clean_env = os.environ.copy()
-            clean_env.pop("_MEIPASS", None)
-            clean_env.pop("_MEIPASS2", None)
-            clean_env.pop("APPDIR", None)
-            if is_frozen and sys.platform.startswith("linux") and "tempupdater" not in os.path.basename(src_target).lower():
-                clean_env["ORIGINAL_APPIMAGE"] = src_target
-
-            kwargs = {
-                "stdin": subprocess.DEVNULL,
-                "stdout": debug_log,
-                "stderr": subprocess.STDOUT,
-                "env": clean_env,
-                "cwd": os.path.expanduser("~")
-            }
-            if sys.platform == "win32":
-                kwargs['creationflags'] = 0x00000008 | 0x00000200
-            else:
-                kwargs['start_new_session'] = True
-
-            proc = subprocess.Popen(args, **kwargs)
-            time.sleep(0.4)
-            if proc.poll() is None:
-                relocated_successfully = True
-        except Exception:
-            pass
-        finally:
-            if debug_log is not None:
-                try:
-                    debug_log.close()
-                except Exception:
-                    pass
-
-        if relocated_successfully:
-            os._exit(0)
-
-    app = QApplication(sys.argv)
+    _tlog(f"Starting TriCoreDownloader Updater GUI (current app version: {APP_VERSION})")
+    app = QApplication.instance()
+    owns_app = app is None
+    if owns_app:
+        app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(True)
+
     window = UpdaterWindow(APP_VERSION)
     window.show()
 
     timer = QTimer(app)
-    timer.start(500)
+    timer.start(350)
     timer.timeout.connect(lambda: None)
     signal.signal(signal.SIGINT, lambda sig, frame: handle_interrupt(window))
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, lambda sig, frame: window._graceful_quit_app(relaunch_main=False))
 
     exit_code = app.exec()
     timer.stop()
     window.clean_up_resources()
     signal.signal(signal.SIGINT, signal.SIG_DFL)
+    _tlog(f"Updater exited with code {exit_code}.")
+    sys.exit(exit_code)
 
-    os._exit(exit_code)
+
+run_updater = main
+
+if __name__ == "__main__" or "--updater" in sys.argv:
+    main()
