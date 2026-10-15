@@ -843,7 +843,7 @@ def launch_updater(parent_window=None, tr_func=None):
                         except Exception:
                             pass
                     err_title = tr_func("msg_error_title") if callable(tr_func) else "Error"
-                    QMessageBox.critical(parent_window, err_title, "Impossible de lancer le module de mise à jour.")
+                    QMessageBox.critical(parent_window, err_title, "Unable to launch the update module")
                 return False
 
             if parent_window:
