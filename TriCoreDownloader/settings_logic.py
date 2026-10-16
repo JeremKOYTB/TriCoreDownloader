@@ -1,5 +1,7 @@
 import os
 import sys
+import stat
+import time
 import ctypes
 import random
 import logging
@@ -39,7 +41,7 @@ class ResetConfirmDialog(QDialog):
         self.is_shift_mode = False
 
         t_func = getattr(self.parent_obj, "T", lambda k, d=None: d if d is not None else k)
-        self.setWindowTitle(t_func("msg_reset_title", "Réinitialisation"))
+        self.setWindowTitle(t_func("msg_reset_title", "Reset"))
         self.setMinimumWidth(480)
 
         layout = QVBoxLayout(self)
@@ -50,9 +52,9 @@ class ResetConfirmDialog(QDialog):
         self.lbl_msg.setWordWrap(True)
         layout.addWidget(self.lbl_msg)
 
-        self.btn_yes = QPushButton(t_func("btn_yes", "Oui"))
+        self.btn_yes = QPushButton(t_func("btn_yes", "Yes"))
         self.btn_yes.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_no = QPushButton(t_func("btn_no", "Non"))
+        self.btn_no = QPushButton(t_func("btn_no", "No"))
         self.btn_no.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_no.setDefault(True)
 
@@ -203,6 +205,29 @@ class SettingsMixin:
         clean_env.pop("_MEIPASS2", None)
         clean_env.pop("_MEIPASS", None)
         clean_env.pop("APPDIR", None)
+        clean_env.pop("OWD", None)
+        clean_env.pop("ARGV0", None)
+
+        if sys.platform.startswith("linux"):
+            clean_env.pop("LD_LIBRARY_PATH", None)
+            clean_env.pop("LD_LIBRARY_PATH_ORIG", None)
+            clean_env.pop("LD_PRELOAD", None)
+            clean_env.pop("QT_PLUGIN_PATH", None)
+            clean_env.pop("QML2_IMPORT_PATH", None)
+            clean_env.pop("PYTHONPATH", None)
+            clean_env.pop("PYTHONHOME", None)
+            clean_env.pop("PYINSTALLER_RESET_ENVIRONMENT", None)
+            for env_key in ("PATH", "XDG_DATA_DIRS", "GI_TYPELIB_PATH", "GST_PLUGIN_SYSTEM_PATH", "GST_PLUGIN_PATH"):
+                if env_key in clean_env:
+                    filtered = [
+                        p for p in clean_env[env_key].split(os.pathsep)
+                        if p and not p.startswith(("/tmp/.mount_", "/tmp/_MEI", "/tmp/appimage_extracted_"))
+                    ]
+                    if filtered:
+                        clean_env[env_key] = os.pathsep.join(filtered)
+                    else:
+                        clean_env.pop(env_key, None)
+            clean_env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
 
         is_frozen = getattr(sys, "frozen", False)
         extra_args = [a for a in sys.argv[1:] if a != "--updater"]
@@ -239,11 +264,17 @@ class SettingsMixin:
             if is_frozen:
                 appimage_env = os.environ.get("ORIGINAL_APPIMAGE") or os.environ.get("APPIMAGE")
                 if appimage_env and os.path.exists(appimage_env):
-                    exe_target = appimage_env
-                    work_dir = os.path.dirname(appimage_env)
+                    exe_target = os.path.abspath(appimage_env)
+                    work_dir = os.path.dirname(exe_target)
+                    clean_env["ORIGINAL_APPIMAGE"] = exe_target
                 else:
                     exe_target = os.path.abspath(sys.executable)
                     work_dir = os.path.dirname(exe_target)
+                try:
+                    st = os.stat(exe_target)
+                    os.chmod(exe_target, st.st_mode | stat.S_IEXEC | 0o755)
+                except Exception:
+                    pass
                 args = [exe_target] + extra_args
             else:
                 script_path = os.path.abspath(sys.argv[0])
@@ -262,6 +293,50 @@ class SettingsMixin:
             kwargs["creationflags"] = 0x00000008 | 0x00000200
         else:
             kwargs["start_new_session"] = True
+
+        if sys.platform.startswith("linux"):
+            launched_ok = False
+            try:
+                proc = subprocess.Popen(args, **kwargs)
+                for _ in range(15):
+                    QApplication.processEvents()
+                    time.sleep(0.1)
+                    if proc.poll() is not None:
+                        break
+                if proc.poll() is None and os.path.exists(f"/proc/{proc.pid}"):
+                    launched_ok = True
+            except Exception:
+                launched_ok = False
+
+            if not launched_ok and is_frozen:
+                try:
+                    fallback_env = clean_env.copy()
+                    fallback_env.pop("APPIMAGE_EXTRACT_AND_RUN", None)
+                    fallback_kwargs = dict(kwargs)
+                    fallback_kwargs["env"] = fallback_env
+                    proc = subprocess.Popen(args, **fallback_kwargs)
+                    for _ in range(15):
+                        QApplication.processEvents()
+                        time.sleep(0.1)
+                        if proc.poll() is not None:
+                            break
+                    if proc.poll() is None and os.path.exists(f"/proc/{proc.pid}"):
+                        launched_ok = True
+                except Exception:
+                    launched_ok = False
+
+            if not launched_ok:
+                self._is_restarting = False
+                return
+
+            self.hide()
+            QApplication.processEvents()
+            time.sleep(0.15)
+            self.close()
+            app = QApplication.instance()
+            if app:
+                app.quit()
+            return
 
         try:
             subprocess.Popen(args, **kwargs)
@@ -393,7 +468,7 @@ class SettingsMixin:
                     out_path.mkdir(parents=True, exist_ok=True)
                     return True
                 except Exception as e:
-                    err_msg = self.T("msg_folder_err", "Impossible de créer le dossier de destination :")
+                    err_msg = self.T("msg_folder_err", "Unable to create destination folder:")
                     QMessageBox.critical(self, self.T("msg_error_title"), f"{err_msg}\n{e}")
                     return False
             else:
@@ -645,6 +720,8 @@ class SettingsMixin:
                 self.commit_save_to_disk()
                 if hasattr(self, "apply_console_theme_colors"):
                     self.apply_console_theme_colors()
+                if hasattr(self, "apply_visual_settings"):
+                    self.apply_visual_settings()
 
     def trigger_auto_save(self, *args):
         if getattr(self, "_is_loading_ui", True):
