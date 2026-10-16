@@ -358,6 +358,10 @@ class UiTabsSettingsAppMixin:
             save_config(self.config)
             if hasattr(self, "apply_console_theme_colors"):
                 self.apply_console_theme_colors()
+            if hasattr(self, "apply_visual_settings"):
+                self.apply_visual_settings()
+            if hasattr(self, "refresh_dynamic_icons"):
+                self.refresh_dynamic_icons()
 
     def retranslate_app_section(self):
         if hasattr(self, "lbl_grp_app"):
