@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QColor, QCursor, QPalette
 from PyQt6.QtCore import Qt
-from .styles import update_app_theme
+from .styles import update_app_theme, MONO_FONT, FS_MONO
 from .config import save_config
 
 _DEFAULT_COLORS = {"#c6a1fa", "#bc181a", "#4ebcff", "#7e57c2", "#c4a1ff", "#e60012", "#009ac7", "auto", ""}
@@ -19,28 +19,44 @@ class RainbowModeMixin:
         self._cached_inputs = self.findChildren(QLineEdit)
 
     def get_console_style(self, hex_color=None):
-        theme = self.config.get("theme", "auto")
+        theme = str(self.config.get("theme", "auto")).lower()
         if theme == "auto":
             theme = "dark" if self.get_effective_is_dark() else "light"
 
         if theme == "oled":
-            bg, fg, border = "#000000", "#F8F9FA", "#333333"
+            bg, fg, border = "#000000", "#9E9E9E", "#212121"
         elif theme == "dark":
-            bg, fg, border = "#1E1E22", "#F8F9FA", "#3A3A40"
+            bg, fg, border = "#32323A", "#D0D0D5", "#555560"
         else:
-            bg, fg, border = "#F8F9FA", "#2B2B30", "#DEE2E6"
+            bg, fg, border = "#FFFFFF", "#495057", "#CED4DA"
 
         border_css = f"2px solid {hex_color}" if hex_color else f"1px solid {border}"
 
         return f"""
-            QPlainTextEdit {{
+            QPlainTextEdit, QPlainTextEdit:focus, QPlainTextEdit:read-only, QPlainTextEdit:disabled {{
                 background-color: {bg};
                 color: {fg};
                 border: {border_css};
+                font-family: {MONO_FONT};
+                font-size: {FS_MONO};
                 border-radius: 6px;
                 padding: 8px;
             }}
         """
+
+    def _apply_console_widget_style(self, hex_color=None):
+        if not hasattr(self, "console") or self.console is None:
+            return
+        target_console = self.get_console_style(hex_color)
+        if self.console.styleSheet() != target_console:
+            self.console.setStyleSheet(target_console)
+        self.console.style().unpolish(self.console)
+        self.console.style().polish(self.console)
+        if self.console.viewport() is not None:
+            self.console.viewport().style().unpolish(self.console.viewport())
+            self.console.viewport().style().polish(self.console.viewport())
+            self.console.viewport().update()
+        self.console.update()
 
     def tick_rainbow(self):
         if not self.isVisible() or self.isMinimized():
@@ -53,13 +69,17 @@ class RainbowModeMixin:
         self.rainbow_hue = (getattr(self, "rainbow_hue", 0.0) + increment) % 360.0
 
         is_dark = self.get_effective_is_dark()
+        current_theme_key = (str(self.config.get("theme", "auto")).lower(), is_dark)
+        theme_changed = getattr(self, "_last_rainbow_theme_key", None) != current_theme_key
+        self._last_rainbow_theme_key = current_theme_key
+
         sat_f = 200.0 / 255.0 if is_dark else 240.0 / 255.0
         val_f = 255.0 / 255.0 if is_dark else 180.0 / 255.0
 
         c = QColor.fromHsvF(self.rainbow_hue / 360.0, sat_f, val_f)
         hex_color = c.name()
 
-        if getattr(self, "last_rainbow_hex", None) == hex_color:
+        if getattr(self, "last_rainbow_hex", None) == hex_color and not theme_changed:
             return
         self.last_rainbow_hex = hex_color
 
@@ -147,12 +167,10 @@ class RainbowModeMixin:
             self.progress_bar.setStyleSheet(f"QProgressBar::chunk {{ background-color: {hex_color}; border-radius: 4px; }}")
 
         if targets.get("console", False):
-            if hasattr(self, "console"):
-                self.console.setStyleSheet(self.get_console_style(hex_color))
-                self._last_rainbow_console_styled = True
-        elif getattr(self, "_last_rainbow_console_styled", False):
-            if hasattr(self, "console"):
-                self.console.setStyleSheet(self.get_console_style())
+            self._apply_console_widget_style(hex_color)
+            self._last_rainbow_console_styled = True
+        elif getattr(self, "_last_rainbow_console_styled", False) or theme_changed:
+            self._apply_console_widget_style(None)
             self._last_rainbow_console_styled = False
 
         do_indicators = targets.get("indicators", True)
@@ -262,6 +280,9 @@ class RainbowModeMixin:
             self._last_rainbow_inputs_styled = False
 
     def apply_visual_settings(self):
+        if getattr(self, "_in_apply_visual_settings", False):
+            return
+        self._in_apply_visual_settings = True
         self.setUpdatesEnabled(False)
         try:
             if hasattr(self, "centralWidget") and self.centralWidget():
@@ -293,14 +314,10 @@ class RainbowModeMixin:
                 self.console_selector.setStyleSheet("")
 
             if hasattr(self, "progress_bar"):
-                target_prog = f"QProgressBar::chunk {{ background-color: {accent}; border-radius: 4px; }}"
-                if self.progress_bar.styleSheet() != target_prog:
-                    self.progress_bar.setStyleSheet(target_prog)
-
-            if hasattr(self, "console"):
-                target_console = self.get_console_style()
-                if self.console.styleSheet() != target_console:
-                    self.console.setStyleSheet(target_console)
+                if self.progress_bar.styleSheet():
+                    self.progress_bar.setStyleSheet("")
+                self.progress_bar.style().unpolish(self.progress_bar)
+                self.progress_bar.style().polish(self.progress_bar)
 
             if getattr(self, "_last_rainbow_indicators_styled", False) or getattr(self, "_last_rainbow_inputs_styled", False):
                 for cache_attr in ("_cached_chk", "_cached_rad", "_cached_sliders", "_cached_inputs"):
@@ -316,6 +333,8 @@ class RainbowModeMixin:
                     self.slider_welcome_vol.setStyleSheet("")
 
             self.update_app_colors(self.config.get("accent_color", ""))
+            self._apply_console_widget_style(None)
+
             self.last_rainbow_hex = ""
             self._last_rainbow_console_styled = False
             self._last_rainbow_indicators_styled = False
@@ -325,10 +344,12 @@ class RainbowModeMixin:
                 if hasattr(self, "rainbow_timer") and not self.rainbow_timer.isActive():
                     self.rainbow_timer.setTimerType(Qt.TimerType.PreciseTimer)
                     self.rainbow_timer.start(33)
+                self.tick_rainbow()
             elif hasattr(self, "rainbow_timer"):
                 self.rainbow_timer.stop()
         finally:
             self.setUpdatesEnabled(True)
+            self._in_apply_visual_settings = False
 
     def update_app_colors(self, custom_color):
         theme_pref = self.config.get("theme", "auto")
@@ -341,19 +362,30 @@ class RainbowModeMixin:
             self.update_color_button()
 
     def get_effective_is_dark(self):
-        actual_theme = self.config.get("theme", "auto")
+        actual_theme = str(self.config.get("theme", "auto")).lower()
         if actual_theme == "light":
             return False
-        if actual_theme in ["dark", "oled"]:
+        if actual_theme in ("dark", "oled"):
             return True
         app = QApplication.instance()
         if app:
             try:
                 scheme = app.styleHints().colorScheme()
-                return scheme == Qt.ColorScheme.Dark
+                if scheme == Qt.ColorScheme.Dark:
+                    return True
+                if scheme == Qt.ColorScheme.Light:
+                    return False
             except AttributeError:
-                palette = app.palette()
-                return palette.color(QPalette.ColorRole.Window).lightness() < 128
+                pass
+            try:
+                import darkdetect
+                return bool(darkdetect.isDark())
+            except Exception:
+                try:
+                    palette = app.palette()
+                    return palette.color(QPalette.ColorRole.Window).lightness() < 128
+                except Exception:
+                    return True
         return True
 
     def refresh_title_color(self):
@@ -414,6 +446,9 @@ class RainbowModeMixin:
             msg_desc = self.T("rb_disabled_msg") if hasattr(self, "T") else "All targets deselected. Mode disabled."
             QMessageBox.information(self, msg_title, msg_desc)
         else:
+            self.last_rainbow_hex = ""
+            if self.config.get("rainbow_mode", False):
+                self.tick_rainbow()
             self.trigger_auto_save()
 
     def pick_color(self):
