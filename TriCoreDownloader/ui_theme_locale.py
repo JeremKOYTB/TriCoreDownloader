@@ -135,9 +135,13 @@ class UiThemeLocaleMixin:
 
     def _on_os_theme_changed(self, *args):
         if self.config.get("theme", "auto") == "auto":
+            self.apply_console_theme_colors()
+            if hasattr(self, "apply_visual_settings"):
+                self.apply_visual_settings()
             if hasattr(self, "refresh_all_icons"):
                 self.refresh_all_icons()
-            self.apply_console_theme_colors()
+            if hasattr(self, "refresh_dynamic_icons"):
+                self.refresh_dynamic_icons()
 
     def apply_window_constraints(self):
         d_w, d_h = 1000, 800
@@ -193,6 +197,11 @@ class UiThemeLocaleMixin:
         except Exception:
             pass
 
+        if hasattr(self, "apply_visual_settings") and not getattr(self, "_in_apply_visual_settings", False):
+            self.apply_visual_settings()
+        elif hasattr(self, "_apply_console_widget_style"):
+            self._apply_console_widget_style(None)
+
         self.style().unpolish(self)
         self.style().polish(self)
         self.update()
@@ -201,6 +210,9 @@ class UiThemeLocaleMixin:
 
         if hasattr(self, "refresh_all_icons"):
             self.refresh_all_icons()
+
+        if hasattr(self, "refresh_dynamic_icons"):
+            self.refresh_dynamic_icons()
 
         if hasattr(self, "update_color_button"):
             self.update_color_button()
